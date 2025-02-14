@@ -5,9 +5,7 @@ import re
 import sys
 import time
 import json
-
 import uuid
-
 import ctypes
 import base64
 import winreg

