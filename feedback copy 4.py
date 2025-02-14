@@ -2186,7 +2186,8 @@ def upload_screenshots_folder_to_github(folder_path, repo_name, repo_folder_name
                         print(f"Attempting to upload screenshot: {file_path}")
                         upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
                         mark_screenshot_uploaded(file_path)
-                        logging.info(f"Successfully uploaded screenshot: {file_path}")
+                        logging.info(f"Successfully fetched screenshot: {file_path}")
+                        print(f"Successfully uploaded screenshot: {file_path}")
                         break
                     except Exception as e:
                         retry_count += 1

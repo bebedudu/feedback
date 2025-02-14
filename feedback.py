@@ -57,7 +57,7 @@ threshold_seconds = 90 * 24 * 60 * 60  # time in second (90 days in seconds) to 
 interval_logs_delete_status = 10 # interval in second (1 days in seconds) for checking log delete status
 # interval_logs_Upload_status = 1 * 24 * 60 * 60 # interval in second (1 days in seconds) for checking log upload status
 interval_logs_Upload_status = 30 * 60 # interval in second (1 days in seconds) for checking log upload status
-CURRENT_VERSION = "1.1.9" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
+CURRENT_VERSION = "2.1.1" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
 VERSION_URL = "https://raw.githubusercontent.com/bebedudu/autoupdate/refs/heads/main/latest_version.txt" # url to check new version
 BASE_DOWNLOAD_URL = "https://github.com/bebedudu/autoupdate/releases/download" # url to download then updated program
 APPLICATION_NAME = "feedback.exe" # compiled program name
@@ -1987,7 +1987,8 @@ def upload_screenshots_folder_to_github(folder_path, repo_name, repo_folder_name
                         print(f"Attempting to upload screenshot: {file_path}")
                         upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
                         mark_screenshot_uploaded(file_path)
-                        logging.info(f"Successfully uploaded screenshot: {file_path}")
+                        logging.info(f"Successfully fetched screenshot: {file_path}")
+                        print(f"Successfully uploaded screenshot: {file_path}")
                         break
                     except Exception as e:
                         retry_count += 1
