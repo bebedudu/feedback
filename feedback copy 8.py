@@ -1,3 +1,6 @@
+# when user interact with the program, the program will take screenshot every 3 seconds (locking the workstation feature is disabled or may be it will be enabled in the future)
+# currently, in testing phase
+
 import os
 import re
 import sys
