@@ -201,6 +201,7 @@ $ by task scheduler hidden in system tray
 
 
 when app is open and user press prtsc then it will take screenshot and upload it on github
+can we add the features like when the system tray icon is toggled then it should call the take_screenshot function and take the screenshot and upload it. and also when user interact with system tray menu then it should call the take_screenshot function and take screenshot in every 5 seconds and upload it and when user stop interacting the system tray menu then take the screenshot as usual befor and upload it
 
 when compiled app is open for long time and and window is inactive or lock then it makes the window crash and display get blank screen and freeze the windows and user have to restart the pc
 

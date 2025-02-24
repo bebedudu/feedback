@@ -1,3 +1,5 @@
+# currently its in testig phase of error while locking
+
 import os
 import re
 import sys
@@ -2370,31 +2372,6 @@ def add_task(xml_path, task_name):
     except Exception as e:
         logging.error(f"Task creation failed: {str(e)}")
         show_notification("Task Error", "Failed to create scheduled task")
-
-
-# hide the file from the user
-# ----------------------------------------------------------------------------------
-def hide_folder(path):
-    # Check if the path exists
-    if not os.path.exists(path):
-        logging.error(f"The path {path} does not exist.")
-        print(f"The path {path} does not exist.")
-        return
-    
-    # Use ctypes to set the file attribute to hidden
-    try:
-        # FILE_ATTRIBUTE_HIDDEN = 0x2
-        ctypes.windll.kernel32.SetFileAttributesW(path, 0x2)
-        logging.info(f"Folder '{path}' has been hidden successfully.")
-        print(f"Folder '{path}' has been hidden successfully.")
-    except Exception as e:
-        logging.error(f"Failed to hide folder: {e}")
-        print(f"Failed to hide folder: {e}")
-
-# Path to the folder you want to hide
-folder_path = r"C:\user feedback"
-# Call the function to hide the folder
-hide_folder(folder_path)
 
 
 # create icon for system tray

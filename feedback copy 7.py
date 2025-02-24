@@ -1,3 +1,5 @@
+# hides the userfeedback folder to the user
+
 import os
 import re
 import sys
