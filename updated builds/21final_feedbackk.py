@@ -1,6 +1,5 @@
 # file not found after certan duration error is fixed
-# manage ss folder currently it's uploading in same path as pc path
-# currently compiled for testing 
+# manage ss folder currently it's feeding in same path as pc path
 
 
 import os

