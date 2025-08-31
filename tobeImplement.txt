@@ -206,3 +206,14 @@ can we add the features like when the system tray icon is toggled then it should
 when compiled app is open for long time and and window is inactive or lock then it makes the window crash and display get blank screen and freeze the windows and user have to restart the pc
 
 when compiled app is open for long time and and window is inactive or lock then it makes the window crash and display get blank screen and freeze the windows and user have to restart the pc
+
+
+
+
+
+
+ip info 
+-------------------------------------
+2025-08-31 09:13:45 - User: bibek, Unique_ID: 1BBDF0EE-FCAA-EC11-9269-8CB87EED61E1 , IP: 103.161.223.11, Location: IN, Odisha, Bhubaneswar, Org: AS137282 KALINGA INSTITUTE OF INDUSTRIAL TECHNOLOGY, Coordinates: 20.2724,85.8338, Postal: 752115, TimeZone: Asia/Kolkata, System Info: {'System': 'Windows', 'Node Name': 'Bibek', 'Release': '11', 'Version': '10.0.26100', 'Machine': 'AMD64', 'Processor': 'Intel64 Family 6 Model 140 Stepping 1, GenuineIntel', 'CPU Cores': 4, 'Logical CPUs': 8, 'Total RAM': '15.56 GB', 'Available RAM': '2.67 GB', 'Used RAM': '12.89 GB', 'RAM Usage': '82.9%', 'Disk Partitions': [sdiskpart(device='C:\\', mountpoint='C:\\', fstype='NTFS', opts='rw,fixed'), sdiskpart(device='D:\\', mountpoint='D:\\', fstype='NTFS', opts='rw,fixed')], 'Disk Usage': {'C:\\': {'Total': '275.26 GB', 'Used': '251.29 GB', 'Free': '23.97 GB', 'Usage': '91.3%'}, 'D:\\': {'Total': '200.00 GB', 'Used': '186.60 GB', 'Free': '13.40 GB', 'Usage': '93.3%'}}, 'IP Address': '10.5.234.63', 'MAC Address': '40:00:00:00:00:00'}
+
+2025-08-31 09:14:50 - User: bibek, Unique_ID: 1BBDF0EE-FCAA-EC11-9269-8CB87EED61E1 , IP: 103.161.223.11, Location: IN, Odisha, Bhubaneswar, Org: AS137282 KALINGA INSTITUTE OF INDUSTRIAL TECHNOLOGY, Coordinates: 20.2724,85.8338, Postal: 752115, TimeZone: Asia/Kolkata, System Info: {'System': 'Windows', 'Node Name': 'Bibek', 'Release': '11', 'Version': '10.0.26100', 'Machine': 'AMD64', 'Processor': 'Intel64 Family 6 Model 140 Stepping 1, GenuineIntel', 'CPU Cores': 4, 'Logical CPUs': 8, 'Total RAM': '15.56 GB', 'Available RAM': '3.78 GB', 'Used RAM': '11.78 GB', 'RAM Usage': '75.7%', 'Disk Partitions': [sdiskpart(device='C:\\', mountpoint='C:\\', fstype='NTFS', opts='rw,fixed'), sdiskpart(device='D:\\', mountpoint='D:\\', fstype='NTFS', opts='rw,fixed')], 'Disk Usage': {'C:\\': {'Total': '275.26 GB', 'Used': '251.30 GB', 'Free': '23.96 GB', 'Usage': '91.3%'}, 'D:\\': {'Total': '200.00 GB', 'Used': '186.60 GB', 'Free': '13.40 GB', 'Usage': '93.3%'}}, 'IP Address': '10.5.234.63', 'MAC Address': '40:00:00:00:00:00'}

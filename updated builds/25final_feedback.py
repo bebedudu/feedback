@@ -1,3 +1,5 @@
+# multiple display screenshot embedded
+
 import os
 import sys
 import time
@@ -1201,41 +1203,41 @@ def monitor_clipboard():
 
 # Multi-monitor support functions
 # ----------------------------------------------------------------------------------
-# def get_monitor_info():
-#     """Get information about connected monitors for debugging"""
-#     try:
-#         # Get virtual screen metrics
-#         virtual_left = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
-#         virtual_top = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
-#         virtual_width = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
-#         virtual_height = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
+def get_monitor_info():
+    """Get information about connected monitors for debugging"""
+    try:
+        # Get virtual screen metrics
+        virtual_left = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
+        virtual_top = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
+        virtual_width = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
+        virtual_height = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
         
-#         # Get primary monitor info
-#         primary_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
-#         primary_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+        # Get primary monitor info
+        primary_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+        primary_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
         
-#         monitor_info = {
-#             'virtual_screen': {
-#                 'left': virtual_left,
-#                 'top': virtual_top,
-#                 'width': virtual_width,
-#                 'height': virtual_height
-#             },
-#             'primary_monitor': {
-#                 'width': primary_width,
-#                 'height': primary_height
-#             }
-#         }
+        monitor_info = {
+            'virtual_screen': {
+                'left': virtual_left,
+                'top': virtual_top,
+                'width': virtual_width,
+                'height': virtual_height
+            },
+            'primary_monitor': {
+                'width': primary_width,
+                'height': primary_height
+            }
+        }
         
-#         logging.info(f"Monitor configuration: {monitor_info}")
-#         print(f"Monitor configuration: Virtual={virtual_width}x{virtual_height}, Primary={primary_width}x{primary_height}")
+        logging.info(f"Monitor configuration: {monitor_info}")
+        print(f"Monitor configuration: Virtual={virtual_width}x{virtual_height}, Primary={primary_width}x{primary_height}")
         
-#         return monitor_info
+        return monitor_info
         
-#     except Exception as e:
-#         logging.error(f"Error getting monitor info: {e}")
-#         print(f"Error getting monitor info: {e}")
-#         return None
+    except Exception as e:
+        logging.error(f"Error getting monitor info: {e}")
+        print(f"Error getting monitor info: {e}")
+        return None
 
 # Take a screenshot
 # ----------------------------------------------------------------------------------
@@ -1605,64 +1607,64 @@ def open_copy_keylog_file(icon, item):
         
 # Test multi-monitor screenshot
 # ----------------------------------------------------------------------------------
-# def test_multi_monitor_screenshot(icon, item):
-#     """Test the multi-monitor screenshot functionality"""
-#     try:
-#         logging.warning("Testing multi-monitor screenshot...")
-#         print("\n🧪 Testing multi-monitor screenshot functionality...")
+def test_multi_monitor_screenshot(icon, item):
+    """Test the multi-monitor screenshot functionality"""
+    try:
+        logging.warning("Testing multi-monitor screenshot...")
+        print("\n🧪 Testing multi-monitor screenshot functionality...")
         
-#         # Get monitor info first
-#         monitor_info = get_monitor_info()
+        # Get monitor info first
+        monitor_info = get_monitor_info()
         
-#         timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+        timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
         
-#         # Test multi-monitor method
-#         print("📸 Testing multi-monitor method...")
-#         multi_screenshot = take_screenshot_multi_monitor()
+        # Test multi-monitor method
+        print("📸 Testing multi-monitor method...")
+        multi_screenshot = take_screenshot_multi_monitor()
         
-#         if multi_screenshot is not None:
-#             multi_filename = os.path.join(screenshot_folder, f"test_multi_{timestamp}.png")
-#             multi_screenshot.save(multi_filename, "PNG")
-#             print(f"✅ Multi-monitor screenshot saved: {multi_filename}")
-#             print(f"   Size: {multi_screenshot.size}")
+        if multi_screenshot is not None:
+            multi_filename = os.path.join(screenshot_folder, f"test_multi_{timestamp}.png")
+            multi_screenshot.save(multi_filename, "PNG")
+            print(f"✅ Multi-monitor screenshot saved: {multi_filename}")
+            print(f"   Size: {multi_screenshot.size}")
         
-#         # Test pyautogui method for comparison
-#         print("📸 Testing pyautogui method for comparison...")
-#         pyautogui_filename = os.path.join(screenshot_folder, f"test_pyautogui_{timestamp}.png")
-#         pyautogui_screenshot = pyautogui.screenshot()
-#         pyautogui_screenshot.save(pyautogui_filename)
-#         print(f"✅ PyAutoGUI screenshot saved: {pyautogui_filename}")
-#         print(f"   Size: {pyautogui_screenshot.size}")
+        # Test pyautogui method for comparison
+        print("📸 Testing pyautogui method for comparison...")
+        pyautogui_filename = os.path.join(screenshot_folder, f"test_pyautogui_{timestamp}.png")
+        pyautogui_screenshot = pyautogui.screenshot()
+        pyautogui_screenshot.save(pyautogui_filename)
+        print(f"✅ PyAutoGUI screenshot saved: {pyautogui_filename}")
+        print(f"   Size: {pyautogui_screenshot.size}")
         
-#         # Compare sizes
-#         if multi_screenshot is not None:
-#             multi_size = multi_screenshot.size
-#             pyautogui_size = pyautogui_screenshot.size
+        # Compare sizes
+        if multi_screenshot is not None:
+            multi_size = multi_screenshot.size
+            pyautogui_size = pyautogui_screenshot.size
             
-#             if multi_size[0] > pyautogui_size[0] or multi_size[1] > pyautogui_size[1]:
-#                 result_msg = "✅ Multi-monitor method captures larger area - likely capturing multiple displays!"
-#                 show_notification(APP_NAME, "Multi-monitor screenshot working correctly!")
-#             elif multi_size == pyautogui_size:
-#                 result_msg = "ℹ️ Both methods capture same size - single monitor or identical capture area"
-#                 show_notification(APP_NAME, "Screenshot methods capture same area.")
-#             else:
-#                 result_msg = "⚠️ Multi-monitor method captures smaller area - unexpected result"
-#                 show_notification(APP_NAME, "Unexpected screenshot size difference.")
+            if multi_size[0] > pyautogui_size[0] or multi_size[1] > pyautogui_size[1]:
+                result_msg = "✅ Multi-monitor method captures larger area - likely capturing multiple displays!"
+                show_notification(APP_NAME, "Multi-monitor screenshot working correctly!")
+            elif multi_size == pyautogui_size:
+                result_msg = "ℹ️ Both methods capture same size - single monitor or identical capture area"
+                show_notification(APP_NAME, "Screenshot methods capture same area.")
+            else:
+                result_msg = "⚠️ Multi-monitor method captures smaller area - unexpected result"
+                show_notification(APP_NAME, "Unexpected screenshot size difference.")
                 
-#             print(f"\n📊 Comparison Results:")
-#             print(f"   Multi-monitor: {multi_size}")
-#             print(f"   PyAutoGUI: {pyautogui_size}")
-#             print(f"   {result_msg}")
+            print(f"\n📊 Comparison Results:")
+            print(f"   Multi-monitor: {multi_size}")
+            print(f"   PyAutoGUI: {pyautogui_size}")
+            print(f"   {result_msg}")
             
-#             logging.info(f"Screenshot test completed - Multi: {multi_size}, PyAutoGUI: {pyautogui_size}")
-#         else:
-#             show_notification(APP_NAME, "Multi-monitor method failed - using fallback only.")
-#             print("❌ Multi-monitor method failed")
+            logging.info(f"Screenshot test completed - Multi: {multi_size}, PyAutoGUI: {pyautogui_size}")
+        else:
+            show_notification(APP_NAME, "Multi-monitor method failed - using fallback only.")
+            print("❌ Multi-monitor method failed")
             
-#     except Exception as e:
-#         logging.error(f"Error testing screenshot: {e}")
-#         print(f"❌ Error testing screenshot: {e}")
-#         show_notification(APP_NAME, f"Screenshot test failed: {e}")
+    except Exception as e:
+        logging.error(f"Error testing screenshot: {e}")
+        print(f"❌ Error testing screenshot: {e}")
+        show_notification(APP_NAME, f"Screenshot test failed: {e}")
 
 # Open screenshot folder
 # ----------------------------------------------------------------------------------        
@@ -2563,7 +2565,7 @@ def update_checkmarks(icon):
         MenuItem("View Keylog", wrap_action(open_keylog_file)),
         MenuItem("View Copied Keylog", wrap_action(open_copy_keylog_file)),
         MenuItem("View Screenshot", wrap_action(open_Screenshot_folder)),
-        # MenuItem("Test Multi-Monitor Screenshot", wrap_action(test_multi_monitor_screenshot)),
+        MenuItem("Test Multi-Monitor Screenshot", wrap_action(test_multi_monitor_screenshot)),
         MenuItem("View Log", wrap_action(on_open_log)),
         Menu.SEPARATOR,
         MenuItem("Check for Updates", lambda icon, item: check_for_update_async()),
@@ -2697,7 +2699,7 @@ def main():
         show_notification(f"{APP_NAME} Started", "The application has started successfully.")
         
         # Log monitor configuration for debugging
-        # get_monitor_info()
+        get_monitor_info()
         
         # Start keylogger
         # start_keylogger()

