@@ -32,3 +32,7 @@ comtypes>=1.1.14
 # Build tools (recommended)
 setuptools>=65.0.0
 wheel>=0.37.0
+
+# Screen Viewer (screenviewer.py only – not needed in compiled feedback.exe)
+streamlit>=1.32.0
+# boto3 no longer needed — replaced by Cloudflare Quick Tunnel (no credentials)

