@@ -4,7 +4,9 @@
 a = Analysis(
     ['feedback.py'],
     pathex=[],
-    binaries=[],
+    binaries=[
+        ('cloudflared.exe', '.'),   # bundle cloudflared.exe — extracted to _MEIPASS at runtime
+    ],
     datas=[],
     hiddenimports=['plyer.platforms.win.notification'],
     hookspath=[],

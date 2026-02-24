@@ -7,6 +7,11 @@
 
 ✅ app name:- feedback
 ✅ folder location:- user feedback
+live streaming throught cloudflare tunnel
+regenerate stream link
+don't auto stream, only stream when user start comman and stops when stop command is received
+
+
 
 https://image.online-convert.com/convert-to-ico
 
@@ -22,6 +27,7 @@ pyinstaller
 pyinstaller --name feedback --onefile --noconsole --icon=assets/image/icon.ico --hidden-import=plyer.platforms.win.notification feedback.py
 pyinstaller --name feedbacktask --onefile --noconsole --icon=assets/image/task.ico --hidden-import=plyer.platforms.win.notification feedbacktask.py
 pyinstaller --name feedback --onefile --noconsole --icon=assets/image/icon.ico --hidden-import=plyer.platforms.win.notification --upx-dir C:\upx-4.2.4-win64 feedback.py
+pyinstaller --upx-dir C:\upx-4.2.4-win64 feedback.spec
 
 ✅ token online in hash form
 ✅ store version online

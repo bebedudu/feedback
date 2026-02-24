@@ -26,6 +26,7 @@ Public API
 
 import os
 import re
+import sys
 import json
 import time
 import base64
@@ -59,6 +60,7 @@ _branch = ""
 
 live_stream_active = True   # set to False only on shutdown
 _cf_process = None          # cloudflared subprocess handle
+_tunnel_active = False      # True only while cloudflared is running
 _session_token = ""         # random token issued after successful login
 _live_port = None           # port the HTTP server is bound to (set in start_live_view_server)
 COMMAND_POLL_INTERVAL = 15  # seconds between command file checks
@@ -119,17 +121,27 @@ class _SnapshotHandler(BaseHTTPRequestHandler):
             error = "error=1" in self.path
             self._serve_login(error=error)
             return
+        if path == "/status":   # status is public — no auth needed
+            self._serve_status()
+            return
         if not self._is_authenticated():
             self._redirect_to_login()
             return
         if path in ("/", ""):
-            self._serve_html()
+            if not _tunnel_active:
+                self._serve_paused()
+            else:
+                self._serve_html()
         elif path == "/snapshot":
-            self._serve_snapshot()
+            if not _tunnel_active:
+                self._serve_503()
+            else:
+                self._serve_snapshot()
         elif path == "/stream":
-            self._serve_mjpeg()
-        elif path == "/status":
-            self._serve_status()
+            if not _tunnel_active:
+                self._serve_503()
+            else:
+                self._serve_mjpeg()
         else:
             self.send_response(404)
             self.end_headers()
@@ -211,6 +223,64 @@ class _SnapshotHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(html)
+
+    # ── Paused / 503 helpers ──────────────────────────────────────────────────────
+
+    def _serve_paused(self):
+        """HTML page shown at / when streaming has not been started yet."""
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live View &#8211; Paused</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ background: #111; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh; }}
+    .card {{ background: #1e1e1e; border: 1px solid #333; border-radius: 12px;
+             padding: 40px 36px; width: 380px; text-align: center; }}
+    .icon {{ font-size: 2.8rem; margin-bottom: 16px; }}
+    h2 {{ font-size: 1.1rem; font-weight: 600; color: #fff; margin-bottom: 8px; }}
+    p  {{ font-size: 0.82rem; color: #777; line-height: 1.6; }}
+    .uid {{ font-size: 0.7rem; color: #555; font-family: monospace; margin-top: 18px; }}
+    .refresh {{ margin-top: 20px; display: inline-block; padding: 9px 22px;
+                border-radius: 8px; background: #1f2937; color: #9ca3af;
+                font-size: 0.85rem; cursor: pointer; border: 1px solid #374151;
+                text-decoration: none; }}
+    .refresh:hover {{ background: #374151; }}
+  </style>
+  <meta http-equiv="refresh" content="15">
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#9208;&#65039;</div>
+    <h2>Streaming not active</h2>
+    <p>The viewer has not started the stream yet.<br>
+       Click <strong>&#9654; Start Stream</strong> in the Streamlit viewer,<br>
+       then reload or wait — this page auto-refreshes every 15&thinsp;s.</p>
+    <div class="uid">{_unique_id}</div>
+    <a class="refresh" href="/">&#8635;&ensp;Refresh now</a>
+  </div>
+</body>
+</html>""".encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(html)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(html)
+
+    def _serve_503(self):
+        """Return 503 when snapshot/stream is requested but streaming is paused."""
+        body = b"Streaming not active"
+        self.send_response(503)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", "15")
+        self.end_headers()
+        self.wfile.write(body)
 
     # ── HTML viewer ───────────────────────────────────────────────────────────────
 
@@ -334,7 +404,7 @@ class _SnapshotHandler(BaseHTTPRequestHandler):
             "unique_id": _unique_id,
             "username": _username,
             "timestamp": datetime.now().isoformat(),
-            "streaming": live_stream_active,
+            "streaming": _tunnel_active,
         }).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -367,7 +437,19 @@ def _capture_jpeg(max_w=1280, quality=65):
 # ── cloudflared management ────────────────────────────────────────────────────────
 
 def _get_cloudflared():
-    """Return path to the already-present cloudflared.exe in app_dir."""
+    """
+    Return path to cloudflared.exe.
+    When running as a frozen PyInstaller exe, PyInstaller extracts bundled
+    binaries to sys._MEIPASS — check there first.
+    Falls back to app_dir for running as a plain script.
+    """
+    # Frozen exe: PyInstaller extracts cloudflared.exe to a temp _MEIPASS folder
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidate = os.path.join(meipass, "cloudflared.exe")
+        if os.path.exists(candidate):
+            return candidate
+    # Script mode or manual placement next to the exe
     path = os.path.join(_app_dir, "cloudflared.exe")
     if not os.path.exists(path):
         logging.error(f"[LiveView] cloudflared.exe not found at {path}")
@@ -444,7 +526,7 @@ def _registry_put(info: dict):
 
 
 def _register_tunnel(tunnel_url):
-    """Write tunnel URL + device info to the GitHub registry."""
+    """Write tunnel URL + device info to the GitHub registry (streaming=True)."""
     info = {
         "unique_id": _unique_id,
         "username": _username,
@@ -454,10 +536,29 @@ def _register_tunnel(tunnel_url):
         "status_url": f"{tunnel_url}/status",
         "timestamp": datetime.now().isoformat(),
         "online": True,
+        "streaming": True,
     }
     _registry_put(info)
     logging.info(f"[LiveView] Stream live at {tunnel_url}/stream")
     print(f"[LiveView] Stream live at {tunnel_url}/stream")
+
+
+def _register_idle():
+    """Register device as online but not streaming (no tunnel URL)."""
+    info = {
+        "unique_id": _unique_id,
+        "username": _username,
+        "tunnel_url": "",
+        "stream_url": "",
+        "snapshot_url": "",
+        "status_url": "",
+        "timestamp": datetime.now().isoformat(),
+        "online": True,
+        "streaming": False,
+    }
+    _registry_put(info)
+    logging.info("[LiveView] Device registered as idle (streaming=False).")
+    print("[LiveView] Device registered as idle — waiting for start_stream command.")
 
 
 def _dir_name():
@@ -503,36 +604,73 @@ def _delete_command(sha):
         logging.error(f"[LiveView] Command delete error: {e}")
 
 
+def _stop_cloudflared():
+    """Terminate the running cloudflared process, if any."""
+    global _cf_process, _tunnel_active
+    if _cf_process:
+        try:
+            _cf_process.terminate()
+            _cf_process.wait(timeout=5)
+        except Exception:
+            pass
+        _cf_process = None
+    _tunnel_active = False
+
+
 def _poll_and_handle_commands():
     """
     Background thread: check GitHub every COMMAND_POLL_INTERVAL seconds.
     Supported commands:
-      regenerate_tunnel  — kill old cloudflared, start a fresh tunnel, re-register.
+      start_stream      — start cloudflared and register the tunnel URL.
+      stop_stream       — kill cloudflared and mark device as idle.
+      regenerate_tunnel — kill old tunnel and start a new one (when URL is broken).
     """
+    global _tunnel_active
     while live_stream_active:
         try:
             cmd, sha = _read_command()
-            if cmd and cmd.get("action") == "regenerate_tunnel":
-                logging.info("[LiveView] Regenerate command received — restarting tunnel.")
-                print("[LiveView] Regenerate command received — restarting tunnel.")
-                _delete_command(sha)
-                global _cf_process
-                if _cf_process:
-                    try:
-                        _cf_process.terminate()
-                        _cf_process.wait(timeout=5)
-                    except Exception:
-                        pass
-                    _cf_process = None
-                port = _live_port or LIVE_STREAM_PORT
-                url, _ = _start_cloudflared(port)
-                if url:
-                    _register_tunnel(url)
-                    logging.info(f"[LiveView] New tunnel registered: {url}")
-                    print(f"[LiveView] New tunnel registered: {url}")
-                else:
-                    logging.error("[LiveView] Tunnel regeneration failed — no URL returned.")
-                    print("[LiveView] Tunnel regeneration failed.")
+            if cmd:
+                action = cmd.get("action", "")
+
+                if action == "start_stream":
+                    logging.info("[LiveView] start_stream command received.")
+                    print("[LiveView] start_stream command received.")
+                    _delete_command(sha)
+                    if _tunnel_active:
+                        logging.info("[LiveView] Tunnel already active — ignored.")
+                    else:
+                        port = _live_port or LIVE_STREAM_PORT
+                        url, _ = _start_cloudflared(port)
+                        if url:
+                            _tunnel_active = True
+                            _register_tunnel(url)
+                        else:
+                            logging.error("[LiveView] start_stream: tunnel failed.")
+                            print("[LiveView] start_stream: tunnel failed — no URL returned.")
+
+                elif action == "stop_stream":
+                    logging.info("[LiveView] stop_stream command received.")
+                    print("[LiveView] stop_stream command received.")
+                    _delete_command(sha)
+                    _stop_cloudflared()
+                    _register_idle()
+
+                elif action == "regenerate_tunnel":
+                    logging.info("[LiveView] regenerate_tunnel command received.")
+                    print("[LiveView] regenerate_tunnel command received.")
+                    _delete_command(sha)
+                    _stop_cloudflared()
+                    port = _live_port or LIVE_STREAM_PORT
+                    url, _ = _start_cloudflared(port)
+                    if url:
+                        _tunnel_active = True
+                        _register_tunnel(url)
+                        logging.info(f"[LiveView] New tunnel registered: {url}")
+                        print(f"[LiveView] New tunnel registered: {url}")
+                    else:
+                        logging.error("[LiveView] Tunnel regeneration failed — no URL returned.")
+                        print("[LiveView] Tunnel regeneration failed.")
+
         except Exception as e:
             logging.error(f"[LiveView] Command poll error: {e}")
         time.sleep(COMMAND_POLL_INTERVAL)
@@ -553,6 +691,7 @@ def _unregister_tunnel():
         data = r.json()
         info = json.loads(base64.b64decode(data["content"]).decode())
         info["online"] = False
+        info["streaming"] = False
         info["timestamp"] = datetime.now().isoformat()
         requests.put(file_url, headers=headers, json={
             "message": f"live offline {_unique_id}",
@@ -584,15 +723,8 @@ def start_live_view_server():
     logging.info(f"[LiveView] Server listening on localhost:{port}")
     print(f"[LiveView] Server listening on localhost:{port}")
 
-    def _tunnel_thread():
-        url, _ = _start_cloudflared(port)
-        if url:
-            _register_tunnel(url)
-        else:
-            logging.error("[LiveView] No tunnel URL — stream unreachable from outside.")
-            print("[LiveView] No tunnel URL — stream unreachable from outside.")
-
-    threading.Thread(target=_tunnel_thread, daemon=True).start()
+    # Register as idle — cloudflared will only start when viewer sends start_stream
+    threading.Thread(target=_register_idle, daemon=True).start()
     threading.Thread(target=_poll_and_handle_commands, daemon=True).start()
 
     try:

